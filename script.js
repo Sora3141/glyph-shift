@@ -626,8 +626,9 @@ let movesWhileSolving = []; // 計算中に打った手。返ってきた手順�
 let solveStart = null;      // 依頼したときの並び。返ってきた手順はここから始まる
 
 // Worker の中で長めに探索する。同期で動かすときは画面が固まるので短くする。
-const HINT_BUDGET_WORKER = 3000;
+// 大きい盤や色数の多い盤は難しいので、Worker では時間を足す（最大 7 秒）。
 const HINT_BUDGET_SYNC = 1200;
+const hintBudgetWorker = () => 3000 + (SIZE >= 49 ? 2500 : 0) + (types >= 6 ? 1500 : 0);
 
 let worker = null;
 let workerBroken = false;   // この環境では Worker が使えないと分かったら、もう試さない
@@ -697,14 +698,14 @@ function requestSolve(done, final = false, background = false) {
   const snap = solveSnapshot();
   solveStart = snap.start;
   if (worker) {
-    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: HINT_BUDGET_WORKER, fallback: snap.fallback });
+    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: hintBudgetWorker(), fallback: snap.fallback });
     // 返事が来ないまま黙り込む環境（file:// で Blob の Worker が止められる等）への保険
     setTimeout(() => {
       if (!hintBusy || solveId !== id) return;
       if (worker) { worker.terminate(); worker = null; }
       workerBroken = true;
       fallbackToSync();
-    }, HINT_BUDGET_WORKER + 2000);
+    }, hintBudgetWorker() + 2000);
   } else {
     // 同期処理なので、呼び出し側が先に画面を描けるよう一拍ずらす
     setTimeout(() => finishSolve(id, Solver.solvePuzzle(problem, snap.start, snap.goal, HINT_BUDGET_SYNC, snap.fallback)), 16);
