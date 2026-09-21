@@ -7,7 +7,9 @@
 // の両方で使える。file:// で開いたときも Blob からなら Worker を作れる。
 //
 // 問題の記述 P
-//   P.N, P.SIZE  盤の一辺とマス数
+//   P.W, P.H     盤の横と縦のマス数。盤は長方形でよい。
+//                P.W / P.H を持たない古い呼び出しは P.N を一辺とする正方形として扱う。
+//   P.SIZE       マス数（= P.W * P.H）
 //   P.cyc[a][i]  能力 a をマス i で使ったときのサイクル（使えなければ null）
 //   P.ord[a][i]  その手の位数（何回で元に戻るか）
 //
@@ -44,6 +46,10 @@ function solverModule() {
 
   // ---- 基本 ----
   const keyOf = (lay) => String.fromCharCode.apply(null, lay);
+
+  // 盤の形。P.W / P.H が無ければ P.N の正方形とみなす（後方互換）。
+  const widthOf = (P) => P.W || P.N;
+  const heightOf = (P) => P.H || P.N;
 
   // サイクルに沿って中身を 1 つ送る（dir < 0 なら逆向き）
   function applyMove(dst, cycles, dir) {
@@ -234,18 +240,18 @@ function solverModule() {
   }
 
   function distanceScorer(P, toward) {
-    const N = P.N;
+    const BW = widthOf(P), BH = heightOf(P);
     const cls = cellClasses(P, new Set(toward));
     const maps = new Map();
     const colors = new Set(toward);
     for (const c of colors) {
-      const m = new Uint8Array(P.SIZE).fill(2 * N);
+      const m = new Uint8Array(P.SIZE).fill(2 * Math.max(BW, BH));
       for (let i = 0; i < P.SIZE; i++) {
         if (toward[i] !== c) continue;
-        const cx = i % N, cy = Math.floor(i / N);
+        const cx = i % BW, cy = Math.floor(i / BW);
         for (let j = 0; j < P.SIZE; j++) {
           if (cls[j] !== cls[i]) continue;
-          const d = Math.max(Math.abs(j % N - cx), Math.abs(Math.floor(j / N) - cy));
+          const d = Math.max(Math.abs(j % BW - cx), Math.abs(Math.floor(j / BW) - cy));
           if (d < m[j]) m[j] = d;
         }
       }
@@ -337,16 +343,16 @@ function solverModule() {
 
   // 幾何
   function geometry(P) {
-    const N = P.N;
+    const BW = widthOf(P), BH = heightOf(P);
     const cx = new Int8Array(P.SIZE), cy = new Int8Array(P.SIZE);
-    for (let i = 0; i < P.SIZE; i++) { cx[i] = i % N; cy[i] = Math.floor(i / N); }
+    for (let i = 0; i < P.SIZE; i++) { cx[i] = i % BW; cy[i] = Math.floor(i / BW); }
     const cheb = (a, b) => Math.max(Math.abs(cx[a] - cx[b]), Math.abs(cy[a] - cy[b]));
     const neighbors = (i) => {
       const out = [];
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dy) continue;
         const x = cx[i] + dx, y = cy[i] + dy;
-        if (x >= 0 && x < N && y >= 0 && y < N) out.push(y * N + x);
+        if (x >= 0 && x < BW && y >= 0 && y < BH) out.push(y * BW + x);
       }
       return out;
     };
@@ -357,7 +363,10 @@ function solverModule() {
       }
       return out;
     };
-    return { cx, cy, cheb, neighbors, within };
+    // 盤の形も一緒に持たせる。以降の幾何はすべて G.W / G.H を見る。
+    const at = (x, y) => y * BW + x;
+    const inBoard = (x, y) => x >= 0 && x < BW && y >= 0 && y < BH;
+    return { cx, cy, cheb, neighbors, within, W: BW, H: BH, at, inBoard };
   }
 
   // 局所探索の舞台。presses のマスだけを押し、変わりうるマス（region）の中身だけを状態に持つ。
@@ -437,13 +446,13 @@ function solverModule() {
   //           帯の中だけで重なるので、確定マスを崩さない交換子が豊富に作れる。
   //   hole:   指定した中心のまわり 3×3 を最後に残し、そこから遠いマスほど先に埋める。
   //           中心は pickHole が「確定マスを崩さずに動かせる配置の数」で選ぶ。
-  function scanOrder(N, mode = 'rows', center = null) {
+  function scanOrder(BW, BH, mode = 'rows', center = null) {
     const out = [];
     if (mode === 'hole' && center) {
       const [hx, hy] = center;
       const cells = [];
-      for (let i = 0; i < N * N; i++) {
-        const x = i % N, y = Math.floor(i / N);
+      for (let i = 0; i < BW * BH; i++) {
+        const x = i % BW, y = Math.floor(i / BW);
         const d = Math.max(Math.abs(x - hx), Math.abs(y - hy));
         cells.push({ i, d, ang: Math.atan2(y - hy, x - hx) });
       }
@@ -453,26 +462,27 @@ function solverModule() {
       return out;
     }
     if (mode === 'band') {
-      const m = Math.max(0, Math.floor((N - 2) / 2));
-      for (let y = 0; y < m; y++) for (let x = 0; x < N; x++) out.push(y * N + x);
-      for (let y = N - 1; y >= m + 2; y--) for (let x = 0; x < N; x++) out.push(y * N + x);
-      for (let x = 0; x < N; x++) for (let y = m; y < Math.min(N, m + 2); y++) out.push(y * N + x);
+      // 帯は縦に 2 行。長方形でも「最後に残す 2 行」は縦方向に取る。
+      const m = Math.max(0, Math.floor((BH - 2) / 2));
+      for (let y = 0; y < m; y++) for (let x = 0; x < BW; x++) out.push(y * BW + x);
+      for (let y = BH - 1; y >= m + 2; y--) for (let x = 0; x < BW; x++) out.push(y * BW + x);
+      for (let x = 0; x < BW; x++) for (let y = m; y < Math.min(BH, m + 2); y++) out.push(y * BW + x);
       return out;
     }
     if (mode === 'spiral') {
-      let x0 = 0, y0 = 0, x1 = N - 1, y1 = N - 1;
+      let x0 = 0, y0 = 0, x1 = BW - 1, y1 = BH - 1;
       while (x0 <= x1 && y0 <= y1) {
-        for (let x = x0; x <= x1; x++) out.push(y0 * N + x);
-        for (let y = y0 + 1; y <= y1; y++) out.push(y * N + x1);
-        if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) out.push(y1 * N + x);
-        if (x1 > x0) for (let y = y1 - 1; y > y0; y--) out.push(y * N + x0);
+        for (let x = x0; x <= x1; x++) out.push(y0 * BW + x);
+        for (let y = y0 + 1; y <= y1; y++) out.push(y * BW + x1);
+        if (y1 > y0) for (let x = x1 - 1; x >= x0; x--) out.push(y1 * BW + x);
+        if (x1 > x0) for (let y = y1 - 1; y > y0; y--) out.push(y * BW + x0);
         x0++; y0++; x1--; y1--;
       }
       return out;
     }
-    const band = Math.min(3, N);
-    for (let y = 0; y < N - band; y++) for (let x = 0; x < N; x++) out.push(y * N + x);
-    for (let x = 0; x < N; x++) for (let y = N - band; y < N; y++) out.push(y * N + x);
+    const band = Math.min(3, BH);
+    for (let y = 0; y < BH - band; y++) for (let x = 0; x < BW; x++) out.push(y * BW + x);
+    for (let x = 0; x < BW; x++) for (let y = BH - band; y < BH; y++) out.push(y * BW + x);
     return out;
   }
 
@@ -485,12 +495,12 @@ function solverModule() {
   // 目標の並びのまま穴の中も押せるものとして見積もる（楽観的な目安）。
   // 位置によって 6 通りしか動かせない所と全部動かせる所があり、差が大きい。
   function pickHole(P, G, goal, deadline, cap = 4000) {
-    const N = P.N;
-    if (N < 4) return null;
+    const BW = widthOf(P), BH = heightOf(P);
+    if (BW < 4 || BH < 4) return null;
     const fact = (m) => { let f = 1; for (let i = 2; i <= m; i++) f *= i; return f; };
     const cands = [];
-    for (let cy = 1; cy < N - 1; cy++) for (let cx = 1; cx < N - 1; cx++) {
-      const dc = Math.max(Math.abs(cx - (N - 1) / 2), Math.abs(cy - (N - 1) / 2));
+    for (let cy = 1; cy < BH - 1; cy++) for (let cx = 1; cx < BW - 1; cx++) {
+      const dc = Math.max(Math.abs(cx - (BW - 1) / 2), Math.abs(cy - (BH - 1) / 2));
       cands.push({ cx, cy, dc });
     }
     cands.sort((a, b) => a.dc - b.dc); // 中央から評価する（時間切れでも中央付近は見ている）
@@ -498,7 +508,7 @@ function solverModule() {
     for (const c of cands) {
       if (performance.now() > deadline) break;
       const hole = [];
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hole.push((c.cy + dy) * N + c.cx + dx);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hole.push((c.cy + dy) * BW + c.cx + dx);
       const inHole = new Uint8Array(P.SIZE);
       for (const h of hole) inHole[h] = 1;
       const A = makeArena(P, G, G.within(hole, 2));
@@ -541,7 +551,9 @@ function solverModule() {
         frontier = next;
       }
       const score = seen.size / limit; // 1 なら（上限の範囲で）全部に届く
-      ranked.push({ center: [c.cx, c.cy], score, orbit: seen.size, total });
+      // 全部に届かない穴では、届く配置の一覧を持っておく。最後の輪を置くときに
+      // 「置いた結果の穴の配置がこの中に入る」ことを条件にできる。
+      ranked.push({ center: [c.cx, c.cy], score, orbit: seen.size, total, cells: hole, keys: score < 1 ? seen : null });
       if (score >= 1) break;
     }
     ranked.sort((a, b) => b.score - a.score);
@@ -796,16 +808,22 @@ function solverModule() {
       for (let n = 0; n < freeQ.length; n++) if (S[freeQ[n]] === c && distT[n] < m) m = distT[n];
       return m;
     };
-    // 終盤のやり直しでは、穴の配置がすでに失敗したものと同じにならない解を求める
-    const rejected = B.rejected;
+    // 終盤では穴の配置に条件を付ける。
+    //   rejected: すでに失敗した配置と同じにならない
+    //   required: 穴を崩さずに揃えられる配置（pickHole が数えた軌道）の中に入る
+    const rejected = B.rejected && B.rejected.size ? B.rejected : null;
+    const required = B.required || null;
     let notRejected = () => true;
-    if (rejected && rejected.size) {
+    if ((rejected || required) && B.holeCells) {
       const holeQ = B.holeCells.map((i) => pos[i]);
-      const outsideKey = B.holeCells.map((i, k) => (holeQ[k] < 0 ? String.fromCharCode(lay[i]) : '')).join('');
+      // 窓の外にある穴のマスは動かないので、その分は定数
+      const outside = B.holeCells.map((i, k) => (holeQ[k] < 0 ? String.fromCharCode(lay[i]) : ''));
       notRejected = (S) => {
         let key = '';
-        for (let k = 0; k < holeQ.length; k++) key += holeQ[k] >= 0 ? String.fromCharCode(S[holeQ[k]]) : '';
-        return !rejected.has(key + outsideKey);
+        for (let k = 0; k < holeQ.length; k++) key += holeQ[k] >= 0 ? String.fromCharCode(S[holeQ[k]]) : outside[k];
+        if (rejected && rejected.has(key)) return false;
+        if (required && !required.has(key)) return false;
+        return true;
       };
     }
     let found = macroSearch(A, S0, fixedQ, {
@@ -882,14 +900,17 @@ function solverModule() {
       }
       return [j, d0];
     };
-    for (let stage = 0; stage < 4 * P.N; stage++) {
+    for (let stage = 0; stage < 4 * Math.max(G.W, G.H); stage++) {
       const [j, d0] = nearestCell();
       if (j < 0) return false;
       if (d0 <= 2) return true;
       if (B.timeUp()) return false;
       // タイルから t へ 2 歩進んだマス
       const sx = Math.sign(G.cx[t] - G.cx[j]), sy = Math.sign(G.cy[t] - G.cy[j]);
-      const mid = (G.cy[j] + 2 * sy) * P.N + (G.cx[j] + 2 * sx);
+      // t 側へ 2 歩。盤の外に出る分は縁で止める（はみ出すと別の行のマスを指してしまう）
+      const mx = Math.min(G.W - 1, Math.max(0, G.cx[j] + 2 * sx));
+      const my = Math.min(G.H - 1, Math.max(0, G.cy[j] + 2 * sy));
+      const mid = G.at(mx, my);
       let found = null;
       for (const [R, cap] of [[2, 20000], [3, 60000]]) {
         const A = makeArena(P, G, G.within([j, mid], R));
@@ -972,8 +993,8 @@ function solverModule() {
       const saved = B.timeUp.deadline;
       // 盤が大きいほど、また終盤（穴のまわりの輪）ほど 1 マスに時間をかける。
       // 盤の端や角は押せる場所が少なく手順が長くなるので、さらに時間を足す。
-      const N = B.P.N, x = t % N, y = Math.floor(t / N);
-      const edges = (x === 0 || x === N - 1 ? 1 : 0) + (y === 0 || y === N - 1 ? 1 : 0);
+      const BW = B.G.W, BH = B.G.H, x = t % BW, y = Math.floor(t / BW);
+      const edges = (x === 0 || x === BW - 1 ? 1 : 0) + (y === 0 || y === BH - 1 ? 1 : 0);
       const scale = (B.P.SIZE >= 81 ? 2 : B.P.SIZE >= 49 ? 1.5 : 1) * (B.left <= 25 ? 1.5 : 1) * (1 + edges);
       B.timeUp.deadline = Math.min(saved, performance.now() + PLACE_MS * scale);
       const ok = placeInner(B, t, c, depth, mark);
@@ -983,7 +1004,7 @@ function solverModule() {
     return placeInner(B, t, c, depth, mark);
   }
 
-  const PLACE_MS = 250;
+  const PLACE_MS = 350;
 
   function placeInner(B, t, c, depth, mark) {
     const { lay, fixed, goal } = B;
@@ -1007,6 +1028,9 @@ function solverModule() {
     if (far >= 2 && directPlace(B, t, c, [t, top.jc], 2, depth === 0 ? 60000 : 30000)) return true;
     // 少し広い窓（道具の置き場も入れる）。分解より安いことが多いので先に試す。
     if (directPlace(B, t, c, [t, top.jc, top.ja], 3, depth === 0 ? 120000 : 60000)) return true;
+    // さらに広い窓。道具が 4 マス先にある盤の端のマスで、これだけが数ミリ秒で解けることがある。
+    // 見つからないときの上限は小さくしておく（辞書が大きく 1 回の展開が重い）。
+    if (depth === 0 && directPlace(B, t, c, [t, top.jc, top.ja], 4, 40000, false)) return true;
     if (depth >= PLACE_MAX_DEPTH) { B.undoTo(mark); return false; }
 
     // 入口ごとの分解
@@ -1123,12 +1147,12 @@ function solverModule() {
     return null;
   }
 
-  function constructive(P, start, goal, T, deadline, mode = 'rows', center = null) {
+  function constructive(P, start, goal, T, deadline, mode = 'rows', center = null, holeInfo = null) {
     const G = geometry(P);
     const B = makeBuilder(P, G, start, goal, deadline);
     B.timeUp.deadline = deadline;
     const { lay, fixed, plan } = B;
-    const order = scanOrder(P.N, mode, center);
+    const order = scanOrder(G.W, G.H, mode, center);
     const endCells = mode === 'band' ? 6 : ENDGAME_CELLS;
     let left = P.SIZE;
 
@@ -1146,6 +1170,22 @@ function solverModule() {
     const deferred = [];
     const history = []; // 置いたマスと、その直前の手順の長さ（やり直し用）
     let retried = false;
+    // 穴が貧しい盤では、輪を閉じる最後の 1 マス（穴以外で最後に残った未確定マス）を
+    // 「置いた結果の穴の配置が軌道に入る」ように置く。
+    const inHole = new Uint8Array(P.SIZE);
+    if (holeInfo) for (const i of holeInfo.cells) inHole[i] = 1;
+    const closesRing = (t) => {
+      if (!holeInfo || !holeInfo.keys || inHole[t]) return false;
+      for (let i = 0; i < P.SIZE; i++) if (i !== t && !fixed[i] && !inHole[i]) return false;
+      return true;
+    };
+    const placeSteered = (t) => {
+      B.holeCells = holeInfo.cells;
+      B.required = holeInfo.keys;
+      const ok = place(B, t, goal[t], 0);
+      B.required = null;
+      return ok;
+    };
     for (const t of order) {
       B.left = left;
       if (B.timeUp()) { trace.push({ t, what: 'timeout' }); return result(false); }
@@ -1154,7 +1194,9 @@ function solverModule() {
         // 後回しにしたマスがあれば、穴を崩さないうちに置き直しておく
         for (let k = deferred.length - 1; k >= 0; k--) {
           const d = deferred[k];
-          if (lay[d] === goal[d] || place(B, d, goal[d], 0)) { fixed[d] = 1; left--; deferred.splice(k, 1); }
+          const before = plan.length;
+          const ok = lay[d] === goal[d] || (closesRing(d) && placeSteered(d)) || place(B, d, goal[d], 0);
+          if (ok) { fixed[d] = 1; left--; deferred.splice(k, 1); if (plan.length > before) history.push({ t: d, mark: before }); }
         }
         const t0 = performance.now();
         let ok = tryEnd(left <= 4 ? 300000 : 120000);
@@ -1166,6 +1208,7 @@ function solverModule() {
           retried = true;
           B.holeCells = [];
           for (let i = 0; i < P.SIZE; i++) if (!fixed[i]) B.holeCells.push(i);
+          if (holeInfo && holeInfo.cells.every((i) => !fixed[i]) && B.holeCells.length === holeInfo.cells.length) B.holeCells = holeInfo.cells;
           B.rejected = new Set();
           const holeKey = () => B.holeCells.map((i) => String.fromCharCode(lay[i])).join('');
           // 直前の 1 マスだけ置き直しても、同じ「届く範囲」の中で配置が変わるだけのことが多い。
@@ -1178,8 +1221,13 @@ function solverModule() {
             for (const h of redo) fixed[h.t] = 0;
             const t1 = performance.now();
             let re = true;
-            for (const h of redo) {
+            for (let k = 0; k < redo.length; k++) {
+              const h = redo[k];
+              // 最後の 1 マスは、軌道が分かっていればその中に入るように置く
+              const steer = k === redo.length - 1 && holeInfo && holeInfo.keys && !holeInfo.cells.includes(h.t);
+              if (steer) { B.holeCells = holeInfo.cells; B.required = holeInfo.keys; }
               re = lay[h.t] === goal[h.t] || place(B, h.t, goal[h.t], 0);
+              if (steer) { B.required = null; if (!re) re = place(B, h.t, goal[h.t], 0); }
               if (!re) break;
               fixed[h.t] = 1;
             }
@@ -1201,7 +1249,14 @@ function solverModule() {
       }
       if (lay[t] !== goal[t]) {
         const t0 = performance.now(), before = plan.length;
-        const ok = place(B, t, goal[t], 0);
+        // 穴が貧しい盤では、輪を閉じる最後の 1 マスを「穴の配置が軌道に入る」ように置く。
+        // 置けなければ条件なしで置く（あとのやり直しに任せる）。
+        let ok = false;
+        if (closesRing(t)) {
+          ok = placeSteered(t);
+          trace.push({ t, what: 'steer', ok, ms: Math.round(performance.now() - t0) });
+        }
+        if (!ok) ok = place(B, t, goal[t], 0);
         trace.push({ t, what: 'place', ok, ms: Math.round(performance.now() - t0), moves: plan.length - before });
         if (!ok) {
           deferred.push(t);
@@ -1382,17 +1437,17 @@ function solverModule() {
     //    途中で止まっても、ほぼ揃った盤面からビームで続きを探す。
     let partial = null;
     const G = geometry(P);
-    const hole = P.N >= 5 ? pickHole(P, G, goal, share(0.12)) : null;
+    const hole = Math.min(G.W, G.H) >= 5 ? pickHole(P, G, goal, share(0.12)) : null;
     tried.hole = hole ? `${hole.center} ${hole.orbit}/${hole.total}` : null;
     // 穴は評価の高い順に 3 つまで試す（豊かな穴が無い盤では、当たる配置になるかは運もある）
     const attempts = [];
-    if (hole) for (const h of hole.ranked.slice(0, 3)) attempts.push({ mode: 'hole', center: h.center, label: `hole${h.center}` });
+    if (hole) for (const h of hole.ranked.slice(0, 3)) attempts.push({ mode: 'hole', center: h.center, info: h, label: `hole${h.center}` });
     attempts.push({ mode: 'spiral' }, { mode: 'rows' });
     for (const at of attempts) {
       if (performance.now() > deadline) break;
       // ビームが先に失敗した盤は難しいので、最初の積み上げに時間を多めに渡す
       const first = at === attempts[0];
-      const cons = constructive(P, start, goal, T, share(first ? (beamFirst && tried.beam === null ? 0.75 : 0.6) : 0.5), at.mode, at.center || null);
+      const cons = constructive(P, start, goal, T, share(first ? (beamFirst && tried.beam === null ? 0.75 : 0.6) : 0.5), at.mode, at.center || null, at.info || null);
       tried['constructive:' + (at.label || at.mode)] = cons.solved ? cons.plan.length : -cons.left;
       if (cons.solved) { cands.push({ plan: cons.plan, method: 'constructive' }); tell(); break; }
       if (!partial || cons.left < partial.left) partial = cons;

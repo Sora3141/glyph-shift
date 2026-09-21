@@ -13,13 +13,15 @@
 //   完成状態から合法手だけで崩して初期盤面を作るので、完成へ戻る手順が必ず存在する。
 //   同時に「直前に打った手がそのまま残る」ので、手詰まり（合法手ゼロ）にもならない。
 
-let N = 4;
-let SIZE = N * N;
+// 盤は長方形にできる。W が横、H が縦のマス数。正方形はその特別な場合。
+let W = 4;
+let H = 4;
+let SIZE = W * H;
 
-const idx = (x, y) => y * N + x;
-const xOf = (i) => i % N;
-const yOf = (i) => Math.floor(i / N);
-const inB = (x, y) => x >= 0 && x < N && y >= 0 && y < N;
+const idx = (x, y) => y * W + x;
+const xOf = (i) => i % W;
+const yOf = (i) => Math.floor(i / W);
+const inB = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -96,7 +98,7 @@ const INFO = {
 function cyclesOf(abIndex, x, y) {
   const self = idx(x, y);
   const out = [];
-  for (const cyc of ABILITIES[abIndex].cells(x, y, N)) {
+  for (const cyc of ABILITIES[abIndex].cells(x, y)) {
     const mapped = [];
     for (const [cx, cy] of cyc) {
       if (!inB(cx, cy)) return null;       // 盤の外 → 使えない
@@ -176,41 +178,41 @@ const bgOf = (abIndex) => ABILITIES[abIndex].color;
 const INK = 'rgba(10, 12, 20, .82)';
 
 // ---- 柄（目標の並び） ----
-// 盤のサイズ N と使うブロック数 K から作れる柄。fn は各マスの色番号（0〜K-1）を返す。
+// 盤の横 W・縦 H と使うブロック数 K から作れる柄。fn は各マスの色番号（0〜K-1）を返す。
 // 先に柄を決めてから、その柄が必要とする個数ぶんだけブロックを用意するので、
 // 目標はつねに実際に作れる配置になる。
 const PATTERNS = [
   { id: 'diag',   ok: () => true,
     label: (k) => (k === 2 ? '市松模様' : '斜めじま'),
-    fn: (x, y, n, k) => (x + y) % k },
+    fn: (x, y, w, h, k) => (x + y) % k },
 
-  { id: 'bands',  ok: (n, k) => n >= k * 2,
+  { id: 'bands',  ok: (w, h, k) => Math.min(w, h) >= k * 2,
     label: () => '太い斜めじま',
-    fn: (x, y, n, k) => Math.floor((x + y) / 2) % k },
+    fn: (x, y, w, h, k) => Math.floor((x + y) / 2) % k },
 
   { id: 'rows',   ok: () => true,
     label: () => '横じま',
-    fn: (x, y, n, k) => y % k },
+    fn: (x, y, w, h, k) => y % k },
 
   { id: 'cols',   ok: () => true,
     label: () => '縦じま',
-    fn: (x, y, n, k) => x % k },
+    fn: (x, y, w, h, k) => x % k },
 
-  { id: 'rings',  ok: (n, k) => Math.ceil(n / 2) >= k,
+  { id: 'rings',  ok: (w, h, k) => Math.ceil(Math.min(w, h) / 2) >= k,
     label: () => '同心の枠',
-    fn: (x, y, n, k) => Math.min(x, y, n - 1 - x, n - 1 - y) % k },
+    fn: (x, y, w, h, k) => Math.min(x, y, w - 1 - x, h - 1 - y) % k },
 
-  { id: 'frame',  ok: (n, k) => k === 2 && n >= 3,
+  { id: 'frame',  ok: (w, h, k) => k === 2 && Math.min(w, h) >= 3,
     label: () => '額縁',
-    fn: (x, y, n) => (x === 0 || y === 0 || x === n - 1 || y === n - 1 ? 0 : 1) },
+    fn: (x, y, w, h) => (x === 0 || y === 0 || x === w - 1 || y === h - 1 ? 0 : 1) },
 
-  { id: 'halves', ok: (n, k) => k === 2,
+  { id: 'halves', ok: (w, h, k) => k === 2,
     label: () => '上下二分割',
-    fn: (x, y, n) => (y >= Math.floor(n / 2) ? 1 : 0) },
+    fn: (x, y, w, h) => (y >= Math.floor(h / 2) ? 1 : 0) },
 
-  { id: 'quads',  ok: (n, k) => k === 4,
+  { id: 'quads',  ok: (w, h, k) => k === 4,
     label: () => '四分割',
-    fn: (x, y, n) => (y >= Math.floor(n / 2) ? 2 : 0) + (x >= Math.floor(n / 2) ? 1 : 0) },
+    fn: (x, y, w, h) => (y >= Math.floor(h / 2) ? 2 : 0) + (x >= Math.floor(w / 2) ? 1 : 0) },
 ];
 
 // ---- 図鑑の柄を取り込む ----
@@ -222,6 +224,7 @@ const PATTERNS = [
 // （枡繋ぎは輪が ⌈n/2⌉ 本しかない等）、実際に並べてみないと分からないため、
 // candidatePatterns の「k 色すべてが出るか」に任せる。
 let patternSeed = 0;   // 種つきの柄に渡す。盤面ごとに変える。
+let forcedAbilities = null;   // カスタムで指定されたブロック。null なら毎回ランダムに選ぶ。
 
 if (typeof tilePatterns === 'function') {
   for (const p of tilePatterns().PATTERNS) {
@@ -229,7 +232,9 @@ if (typeof tilePatterns === 'function') {
       id: p.id,
       ok: () => true,
       label: () => p.name,
-      fn: (x, y, n, k) => p.f(y, x, n, k, patternSeed),
+      // 図鑑の柄は正方形が前提（回転対称など）。長方形では大きい方を一辺とする
+      // 正方形の柄を作り、その左上を切り出して使う。
+      fn: (x, y, w, h, k) => p.f(y, x, Math.max(w, h), k, patternSeed),
     });
   }
 }
@@ -238,9 +243,9 @@ if (typeof tilePatterns === 'function') {
 // マス数さえ足りれば必ず全色が出る。正規の柄が 1 つも作れないときだけ使う。
 const FALLBACK = {
   id: 'serial',
-  ok: (n, k) => k <= n * n,
+  ok: (w, h, k) => k <= w * h,
   label: () => '順送り',
-  fn: (x, y, n, k) => (y * n + x) % k,
+  fn: (x, y, w, h, k) => (y * w + x) % k,
 };
 
 // このサイズとブロック数で実際に作れる柄を洗い出す。
@@ -248,12 +253,12 @@ const FALLBACK = {
 // ・配置が完全に一致する柄は 1 つにまとめる
 //   （例: 4×4 では「額縁」と「同心の枠」が同じ配置になり、
 //     両方残すとその柄だけ 2 倍の確率で出てしまう）
-function candidatePatterns(n, k) {
+function candidatePatterns(w, h, k) {
   const out = [];
   const seen = new Set();
   for (const p of PATTERNS) {
-    if (!p.ok(n, k)) continue;
-    const layout = Array.from({ length: n * n }, (_, i) => p.fn(i % n, Math.floor(i / n), n, k));
+    if (!p.ok(w, h, k)) continue;
+    const layout = Array.from({ length: w * h }, (_, i) => p.fn(i % w, Math.floor(i / w), w, h, k));
     if (new Set(layout).size !== k) continue;
     const sig = layout.join(',');
     if (seen.has(sig)) continue;
@@ -262,7 +267,7 @@ function candidatePatterns(n, k) {
   }
   // 小さい盤に色数が多いと、どの柄も全色を出せないことがある。
   // その場合だけ予備の並べ方に落として、組み合わせ自体は選べるようにする。
-  if (!out.length && FALLBACK.ok(n, k)) out.push(FALLBACK);
+  if (!out.length && FALLBACK.ok(w, h, k)) out.push(FALLBACK);
   return out;
 }
 
@@ -271,7 +276,7 @@ const SIZES = [3, 4, 5, 6, 7, 8, 9, 10];
 const TYPE_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 // そのサイズで、そのブロック数の柄が作れるか
-const typeAvailable = (n, k) => k <= ABILITIES.length && k <= n * n && candidatePatterns(n, k).length > 0;
+const typeAvailable = (w, h, k) => k <= ABILITIES.length && k <= w * h && candidatePatterns(w, h, k).length > 0;
 
 // ---- 状態 ----
 // 完成状態から混ぜる手数。
@@ -322,12 +327,15 @@ const legalCells = () => {
 
 // ---- DOM ----
 function buildDom() {
-  // --n と --cell はルートに置く。盤面エリアの幅計算（style.css）からも参照するため。
-  document.documentElement.style.setProperty('--n', N);
-  const cell = N >= 9 ? 46 : N >= 7 ? 54 : N === 6 ? 64 : 72;
-  document.documentElement.style.setProperty('--cell', `${cell}px`);
+  // --nx / --ny / --cell はルートに置く。盤面エリアの幅計算（style.css）からも参照するため。
+  const root = document.documentElement.style;
+  root.setProperty('--nx', W);
+  root.setProperty('--ny', H);
+  const long = Math.max(W, H);
+  const cell = long >= 9 ? 46 : long >= 7 ? 54 : long === 6 ? 64 : 72;
+  root.setProperty('--cell', `${cell}px`);
   // 目標の柄はサイドバー（250px）に収める
-  document.documentElement.style.setProperty('--mini-cell', `${Math.min(30, Math.floor((228 - 4 * (N - 1)) / N))}px`);
+  root.setProperty('--mini-cell', `${Math.min(30, Math.floor((228 - 4 * (W - 1)) / W))}px`);
   gridEl.replaceChildren();
   slots.length = 0;
   tiles.length = 0;
@@ -346,7 +354,7 @@ function buildDom() {
   }
 
   // 行・列の目盛り。ヒントが「3 列目・4 行目」と言うので、位置を数えずに済む。
-  for (const [el, n] of [[document.getElementById('rulerX'), N], [document.getElementById('rulerY'), N]]) {
+  for (const [el, n] of [[document.getElementById('rulerX'), W], [document.getElementById('rulerY'), H]]) {
     el.replaceChildren();
     for (let k = 1; k <= n; k++) {
       const s = document.createElement('span');
@@ -500,7 +508,7 @@ function renderPanel() {
       where.className = 'blk-where';
       const map = document.createElement('div');
       map.className = 'blk-map';
-      map.style.gridTemplateColumns = `repeat(${N}, 8px)`;
+      map.style.gridTemplateColumns = `repeat(${W}, 8px)`;
       let on = 0;
       for (let i = 0; i < SIZE; i++) {
         const cell = document.createElement('i');
@@ -510,7 +518,7 @@ function renderPanel() {
       const note = document.createElement('span');
       note.textContent = `使える位置 ${on} / ${SIZE}`;
       map.setAttribute('role', 'img');
-      map.setAttribute('aria-label', `${N}×${N} の盤で使える位置は ${on} マス`);
+      map.setAttribute('aria-label', `${W}×${H} の盤で使える位置は ${on} マス`);
       where.append(map, note);
 
       main.append(name, detail, where);
@@ -646,7 +654,7 @@ function buildProblem() {
     cyc.push(per);
     ord.push(per.map((c) => (c ? orderOf(c) : 0)));
   }
-  return { N, SIZE, cyc, ord };
+  return { W, H, N: W, SIZE, cyc, ord };
 }
 
 let problem = null;
@@ -702,8 +710,23 @@ function solveSnapshot() {
 }
 
 // 返事を受け取る。途中経過（partial）なら手順だけ差し替えて、計算は続いているものとして扱う。
+// 手順が本当に目標へ着くかを確かめる。
+// ソルバーは盤の形を正方形として見積もる部分があり、長方形では
+// 見当違いの手順を返しうる。着かないものは黙って捨てて保険に任せる。
+function planReachesGoal(plan, startLay) {
+  const lay = Uint8Array.from(startLay);
+  for (const [i, dir] of plan) {
+    const cyc = problem.cyc[lay[i]][i];
+    if (!cyc) return false;
+    applyTo(lay, cyc, dir);
+  }
+  for (let i = 0; i < SIZE; i++) if (lay[i] !== tileAbility[i]) return false;
+  return true;
+}
+
 function finishSolve(id, res, partial = false) {
   if (id !== solveId) return; // 盤面が変わった後の返事
+  if (res && res.plan && !planReachesGoal(res.plan, solveStart)) res = null;
   if (res && res.plan) {
     const plan = { runs: Solver.planToRuns(problem, res.plan, solveStart), optimal: res.optimal, ms: Math.round(res.ms), method: res.method };
     // 計算しているあいだに打った手ぶんだけ手順を進める
@@ -1060,25 +1083,36 @@ function removeLoops(path, tbl) {
 function newPuzzle(useSeed) {
   seed = Number.isFinite(useSeed) ? useSeed : Math.floor(Math.random() * 1e9);
   const rng = mulberry32(seed);
-  const K = Math.min(types, SIZE, ABILITIES.length);
+  const K = Math.min(forcedAbilities ? forcedAbilities.length : types, SIZE, ABILITIES.length);
   let steps = scrambleSteps();
 
   patternSeed = Math.floor(rng() * 1e9);   // 種つきの柄を盤面ごとに変える
-  const cands = candidatePatterns(N, K);
+  const cands = candidatePatterns(W, H, K);
 
   for (let attempt = 0; ; attempt++) {
     const pat = cands[Math.floor(rng() * cands.length)];
 
-    // 使うブロックを K 種類選ぶ
-    const pool = ABILITIES.map((_, k) => k);
-    for (let k = pool.length - 1; k > 0; k--) {
-      const j = Math.floor(rng() * (k + 1));
-      [pool[k], pool[j]] = [pool[j], pool[k]];
+    // 使うブロックを K 種類選ぶ。カスタムで指定があればそれを使う。
+    // ただし指定した組ではどの柄も崩せないことがありうるので、
+    // 一定回数を超えたらランダム選びに戻して必ず終わらせる。
+    let picked;
+    if (forcedAbilities && attempt < 200) {
+      picked = [...forcedAbilities];
+      for (let k = picked.length - 1; k > 0; k--) {
+        const j = Math.floor(rng() * (k + 1));
+        [picked[k], picked[j]] = [picked[j], picked[k]];
+      }
+    } else {
+      const pool = ABILITIES.map((_, k) => k);
+      for (let k = pool.length - 1; k > 0; k--) {
+        const j = Math.floor(rng() * (k + 1));
+        [pool[k], pool[j]] = [pool[j], pool[k]];
+      }
+      picked = pool.slice(0, K);
     }
-    const picked = pool.slice(0, K);
 
     // 柄を目標配置にする。タイル v の能力 = 完成時にマス v に来る色。
-    tileAbility = Array.from({ length: SIZE }, (_, i) => picked[pat.fn(xOf(i), yOf(i), N, K)]);
+    tileAbility = Array.from({ length: SIZE }, (_, i) => picked[pat.fn(xOf(i), yOf(i), W, H, K)]);
 
     // 完成状態から混ぜる → 必ず解ける。Metropolis 補正なので定常分布は一様。
     const tbl = buildMoveTable();
@@ -1266,14 +1300,22 @@ document.addEventListener('keydown', (e) => {
 
 // ---- 盤面の設定 ----
 // 選んだ内容はいったん保留し、「作成」を押したときだけ盤面に反映する。
-let pendN = N;
+let pendW = W;
+let pendH = H;
 let pendTypes = types;
+let pendCustom = false;
+let pendPicked = new Set();   // カスタムで選んだブロック
 
 const seedInEl = document.getElementById('seedIn');
-
 const sizeSegEl = document.getElementById('sizeSeg');
 const typeSegEl = document.getElementById('typeSeg');
 const typeNoteEl = document.getElementById('typeNote');
+const createBtnEl = document.getElementById('createBtn');
+const customChk = document.getElementById('customChk');
+const wSegEl = document.getElementById('wSeg');
+const hSegEl = document.getElementById('hSeg');
+const pickerEl = document.getElementById('blockPicker');
+const pickNoteEl = document.getElementById('pickNote');
 
 function markSeg(el, value) {
   for (const b of el.querySelectorAll('button')) {
@@ -1298,39 +1340,87 @@ function refreshTypeSeg() {
   let unavailable = 0;
   for (const b of typeSegEl.querySelectorAll('button')) {
     const k = Number(b.dataset.v);
-    const okK = typeAvailable(pendN, k);
+    const okK = typeAvailable(pendW, pendH, k);
     b.disabled = !okK;
     if (!okK) unavailable++;
   }
   // 選択中の数が使えなくなったら、使える範囲でいちばん近い数に寄せる
-  if (!typeAvailable(pendN, pendTypes)) {
-    const usable = TYPE_COUNTS.filter((k) => typeAvailable(pendN, k));
+  if (!typeAvailable(pendW, pendH, pendTypes)) {
+    const usable = TYPE_COUNTS.filter((k) => typeAvailable(pendW, pendH, k));
     pendTypes = usable.reduce((best, k) =>
       Math.abs(k - pendTypes) < Math.abs(best - pendTypes) ? k : best, usable[0]);
   }
   markSeg(typeSegEl, pendTypes);
   typeNoteEl.textContent = unavailable
-    ? `${pendN}×${pendN} では、この色数で作れる柄がないものを伏せています。`
+    ? `${pendW}×${pendH} では、この色数で作れる柄がないものを伏せています。`
     : '';
 }
 
+// カスタムのブロック選び
+function fillPicker() {
+  pickerEl.replaceChildren();
+  ABILITIES.forEach((ab, k) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.v = String(k);
+    b.title = ab.name;
+    b.setAttribute('aria-label', ab.name);
+    b.style.background = bgOf(k);
+    b.style.color = INK;
+    b.innerHTML = iconSvg(k);
+    pickerEl.append(b);
+  });
+}
+
+function refreshPicker() {
+  for (const b of pickerEl.querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(pendPicked.has(Number(b.dataset.v))));
+  }
+  const n = pendPicked.size;
+  const max = Math.min(ABILITIES.length, pendW * pendH);
+  pickNoteEl.textContent = n < 2
+    ? '2 種類以上えらんでください。'
+    : n > max
+      ? `${pendW}×${pendH} には ${max} 種類までしか置けません。`
+      : `${n} 種類をえらんでいます。`;
+}
+
+// カスタムの表示を切り替える
+function refreshCustom() {
+  document.getElementById('plainSize').hidden = pendCustom;
+  document.getElementById('plainTypes').hidden = pendCustom;
+  document.getElementById('customSize').hidden = !pendCustom;
+  document.getElementById('customBlocks').hidden = !pendCustom;
+  customChk.checked = pendCustom;
+  if (pendCustom) { markSeg(wSegEl, pendW); markSeg(hSegEl, pendH); refreshPicker(); }
+  else { markSeg(sizeSegEl, pendW); refreshTypeSeg(); }
+  createBtnEl.disabled = pendCustom && !customReady();
+}
+
+const customReady = () => pendPicked.size >= 2 && pendPicked.size <= Math.min(ABILITIES.length, pendW * pendH);
+
 // パネルを開くたびに、今の盤面の設定に合わせ直す
 function syncSetup() {
-  pendN = N;
+  pendW = W;
+  pendH = H;
   pendTypes = types;
-  markSeg(sizeSegEl, pendN);
-  refreshTypeSeg();
+  pendCustom = W !== H || forcedAbilities !== null;
+  pendPicked = new Set(forcedAbilities || [...new Set(tileAbility)]);
   seedInEl.value = '';
+  refreshCustom();
 }
 
 fillSeg(sizeSegEl, SIZES, (v) => `${v}×${v}`);
 fillSeg(typeSegEl, TYPE_COUNTS, (v) => `${v} 種`);
+fillSeg(wSegEl, SIZES, (v) => String(v));
+fillSeg(hSegEl, SIZES, (v) => String(v));
+fillPicker();
 
 sizeSegEl.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b || b.disabled) return;
-  pendN = Number(b.dataset.v);
-  markSeg(sizeSegEl, pendN);
+  pendW = pendH = Number(b.dataset.v);
+  markSeg(sizeSegEl, pendW);
   refreshTypeSeg();
 });
 typeSegEl.addEventListener('click', (e) => {
@@ -1339,14 +1429,39 @@ typeSegEl.addEventListener('click', (e) => {
   pendTypes = Number(b.dataset.v);
   markSeg(typeSegEl, pendTypes);
 });
+for (const [el, set] of [[wSegEl, (v) => { pendW = v; }], [hSegEl, (v) => { pendH = v; }]]) {
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.disabled) return;
+    set(Number(b.dataset.v));
+    refreshCustom();
+  });
+}
+pickerEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const k = Number(b.dataset.v);
+  if (pendPicked.has(k)) pendPicked.delete(k); else pendPicked.add(k);
+  refreshPicker();
+  createBtnEl.disabled = !customReady();
+});
+customChk.addEventListener('change', () => { pendCustom = customChk.checked; refreshCustom(); });
 
-document.getElementById('createBtn').addEventListener('click', () => {
-  if (pendN !== N) {
-    N = pendN;
-    SIZE = N * N;
+createBtnEl.addEventListener('click', () => {
+  if (pendCustom && !customReady()) return;
+  if (pendW !== W || pendH !== H) {
+    W = pendW;
+    H = pendH;
+    SIZE = W * H;
     buildDom();
   }
-  types = pendTypes;
+  if (pendCustom) {
+    forcedAbilities = [...pendPicked].sort((a, b) => a - b);
+    types = forcedAbilities.length;
+  } else {
+    forcedAbilities = null;
+    types = pendTypes;
+  }
   const v = parseInt(seedInEl.value, 10);
   newPuzzle(Number.isFinite(v) ? v : undefined);
   setPanel('setup', false);

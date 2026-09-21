@@ -58,14 +58,32 @@
       <button id="setupClose" class="panel-close" type="button" aria-label="閉じる">&times;</button>
     </div>
     <div class="setup-body">
-      <div class="field">
+      <label class="switch">
+        <input type="checkbox" id="customChk">
+        <span>カスタム</span>
+        <span class="switch-note">盤を長方形にして、使うブロックも自分で選ぶ</span>
+      </label>
+
+      <div class="field" id="plainSize">
         <span class="label">サイズ</span>
         <div class="seg" id="sizeSeg" role="group" aria-label="盤のサイズ"></div>
       </div>
-      <div class="field">
+      <div class="field" id="plainTypes">
         <span class="label">ブロック数</span>
         <div class="seg" id="typeSeg" role="group" aria-label="ブロック数"></div>
         <p class="note" id="typeNote"></p>
+      </div>
+
+      <div class="field" id="customSize" hidden>
+        <span class="label">横のマス</span>
+        <div class="seg" id="wSeg" role="group" aria-label="横のマス数"></div>
+        <span class="label spaced">縦のマス</span>
+        <div class="seg" id="hSeg" role="group" aria-label="縦のマス数"></div>
+      </div>
+      <div class="field" id="customBlocks" hidden>
+        <span class="label">使うブロック</span>
+        <div class="picker" id="blockPicker"></div>
+        <p class="note" id="pickNote"></p>
       </div>
       <div class="field">
         <span class="label">SEED</span>
