@@ -537,15 +537,26 @@ function applyTo(b, cycles, dir = 1) {
   }
 }
 
-// 盤面を書き換えて、動いたタイルだけを滑らせる
-function animatePlacement(mutate) {
-  const before = new Map();
-  for (const t of tiles) {
-    // 前の手のアニメーションが残っていると変形後の座標を測ってしまい、
-    // 動いていないタイルにも差分が出て震える。測る前に必ず打ち切る。
-    for (const a of t.getAnimations()) a.cancel();
-    before.set(t, t.getBoundingClientRect());
+// 盤面を書き換えて、動いたタイルだけを滑らせる。
+//
+// 滑る時間は呼び出し側から指定する。ms に 0 を渡すと滑らせずに置き換える。
+// 置換をスライドで見せる以上、途中はタイルが敷き詰まらず下のマスが覗く。
+// 1 手ずつなら動く数も距離も小さいので気にならないが、自動再生で何十手も
+// まとめて動かすと画面じゅうに隙間が出る。そこは滑らせない方が静かで速い。
+function animatePlacement(mutate, ms = 300) {
+  // 前の手のアニメーションが残っていると変形後の座標を測ってしまい、
+  // 動いていないタイルにも差分が出て震える。測る前に必ず打ち切る。
+  for (const t of tiles) for (const a of t.getAnimations()) a.cancel();
+
+  if (!ms) {                      // 滑らせずに置き換える
+    mutate();
+    placeTiles();
+    markUsable();
+    return;
   }
+
+  const before = new Map();
+  for (const t of tiles) before.set(t, t.getBoundingClientRect());
 
   mutate();
   placeTiles();
@@ -559,7 +570,7 @@ function animatePlacement(mutate) {
     if (!dx && !dy) continue;
     t.animate(
       [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
-      { duration: 300, easing: 'cubic-bezier(.2,.75,.3,1)' }
+      { duration: ms, easing: 'cubic-bezier(.2,.75,.3,1)' }
     );
   }
 }
@@ -898,6 +909,9 @@ function stepAuto() {
 
   // まとめて進めるぶんも 1 回の滑らかな移動として見せる。
   // 手順の順番どおりに進むので、揃っていく過程はそのまま見える。
+  // 追える大きさのときだけ滑らせる。次の刻みが来る前に必ず到着させる。
+  // まとめて動かすときは滑らせない（途中の隙間が目立つうえ、追えもしない）。
+  const slide = chunk <= 3 ? Math.min(300, Math.round(interval * 0.75)) : 0;
   let last = null;
   animatePlacement(() => {
     for (let c = 0; c < chunk; c++) {
@@ -910,7 +924,7 @@ function stepAuto() {
       if (!applyMoveState(r.i, dir)) break;
       last = { i: r.i, dir, ab };
     }
-  });
+  }, slide);
   if (last) {
     flashSlot(last.i, last.dir);
     Sfx.move(last.ab, last.dir);      // 音は 1 回ぶんだけ
