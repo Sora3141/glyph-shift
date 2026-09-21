@@ -8,6 +8,17 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="style.css">
+
+<!-- アプリとしてインストールできるようにする（Chrome の「アプリをインストール」） -->
+<meta name="description" content="絵柄が能力を表すパズル。押すとその絵柄の効果が発動し、能力はブロックに付いて一緒に動く。">
+<meta name="theme-color" content="#131217">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Glyph Shift">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 </head>
 <body>
   <header class="rail">
@@ -208,5 +219,13 @@
   <script src="glyphs.js"></script>
   <script src="solver.js"></script>
   <script src="script.js"></script>
+  <script>
+    // Service Worker はインストールの条件であり、通信が無くても遊べるようにするもの。
+    // file:// で開いたときは登録できないので、その場合は黙って見送る。
+    if ('serviceWorker' in navigator
+        && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  </script>
 </body>
 </html>
