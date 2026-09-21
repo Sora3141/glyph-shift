@@ -131,6 +131,13 @@
           </svg>
           揃える
         </button>
+        <button id="newBtn" class="action" type="button" aria-label="同じ設定で新しい盤面を作る">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 11a8 8 0 1 0-.6 4"/>
+            <path d="M20 5.5V11h-5.5"/>
+          </svg>
+          再生成
+        </button>
       </div>
     </section>
 
@@ -149,8 +156,8 @@
 
   <div class="modal" id="confirmOverlay" hidden>
     <div class="modal-card">
-      <h2>自動で揃える</h2>
-      <p>盤面が動いて目標の柄まで揃います。<br>この盤面は自分で解けなくなります。</p>
+      <h2 id="confirmTitle">自動で揃える</h2>
+      <p id="confirmText">盤面が動いて目標の柄まで揃います。<br>この盤面は自分で解けなくなります。</p>
       <div class="modal-row">
         <button id="confirmNo" class="ghost-btn" type="button">やめる</button>
         <button id="confirmYes" class="primary" type="button">揃える</button>

@@ -828,17 +828,48 @@ function autoPace(total) {
 }
 
 const confirmEl = document.getElementById('confirmOverlay');
+const confirmTitleEl = document.getElementById('confirmTitle');
+const confirmTextEl = document.getElementById('confirmText');
+const confirmYesEl = document.getElementById('confirmYes');
+let confirmAction = null;   // 「はい」を押したときにすること
+
+// 確認画面はひとつを使い回す。見出し・本文・決定ボタンの文言を差し替える。
+function askConfirm(title, text, yesLabel, action) {
+  confirmTitleEl.textContent = title;
+  confirmTextEl.innerHTML = text;
+  confirmYesEl.textContent = yesLabel;
+  confirmAction = action;
+  confirmEl.hidden = false;
+  document.getElementById('confirmNo').focus();
+}
+
+function closeConfirm() {
+  confirmEl.hidden = true;
+  confirmAction = null;
+}
 const autoBarEl = document.getElementById('autoBar');
 const autoTextEl = document.getElementById('autoText');
 
 function askAutoSolve() {
   if (autoSolving || locked) return;
-  confirmEl.hidden = false;
-  document.getElementById('confirmNo').focus();
+  askConfirm('自動で揃える',
+    '盤面が動いて目標の柄まで揃います。<br>この盤面は自分で解けなくなります。',
+    '揃える', startAutoSolve);
+}
+
+// 盤面を作り直す。サイズとブロック数の設定は据え置きで、
+// 使うブロックの組み合わせも目標の柄も引き直す。
+// 揃えたあとに次へ進む手段でもあるので、完成していても押せる。
+function askRegenerate() {
+  if (autoSolving) return;
+  askConfirm('新しい盤面を作る',
+    'サイズとブロック数はそのままで、'
+    + '<strong>使うブロックも目標の柄も</strong>選び直します。<br>今の盤面は元に戻せません。',
+    '作る', () => { closeConfirm(); newPuzzle(); });
 }
 
 function startAutoSolve() {
-  confirmEl.hidden = true;
+  closeConfirm();
   if (autoSolving || locked) return;
   // 手順の計算が終わるまで入力を受けないよう、先に自動モードに入る
   autoSolving = true;
@@ -1056,7 +1087,7 @@ function newPuzzle(useSeed) {
 
   stopAutoSolve();
   autoSolvedFlag = false;
-  confirmEl.hidden = true;
+  closeConfirm();
   gridEl.classList.remove('cleared');
   logEl.classList.remove('done');
   moves = 0;
@@ -1160,8 +1191,9 @@ function markSound() {
 soundBtn.addEventListener('click', () => { Sfx.set(!Sfx.enabled); markSound(); });
 markSound();
 document.getElementById('solveBtn').addEventListener('click', askAutoSolve);
-document.getElementById('confirmYes').addEventListener('click', startAutoSolve);
-document.getElementById('confirmNo').addEventListener('click', () => { confirmEl.hidden = true; });
+document.getElementById('newBtn').addEventListener('click', askRegenerate);
+confirmYesEl.addEventListener('click', () => { const a = confirmAction; if (a) a(); });
+document.getElementById('confirmNo').addEventListener('click', closeConfirm);
 document.getElementById('autoStop').addEventListener('click', stopAutoSolve);
 
 // ---- パネルの開閉 ----
@@ -1213,7 +1245,7 @@ backdropEl.addEventListener('click', () => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  if (!confirmEl.hidden) { confirmEl.hidden = true; return; }
+  if (!confirmEl.hidden) { closeConfirm(); return; }
   if (autoSolving) { stopAutoSolve(); return; }
   for (const key of Object.keys(PANELS)) if (isOpen(key)) setPanel(key, false);
 });
