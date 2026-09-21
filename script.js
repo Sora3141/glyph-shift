@@ -246,7 +246,7 @@ function candidatePatterns(n, k) {
 }
 
 // 選べる盤のサイズとブロック数
-const SIZES = [4, 5, 6, 7, 8, 9, 10];
+const SIZES = [3, 4, 5, 6, 7, 8, 9, 10];
 const TYPE_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 // そのサイズで、そのブロック数の柄が作れるか
