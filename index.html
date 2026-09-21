@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glyph Shift</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="rail">
+    <div class="mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+        <circle cx="6" cy="6" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="12" cy="6" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="18" cy="6" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="18" cy="12" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="18" cy="18" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="12" cy="18" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="6" cy="18" r="1.7" fill="currentColor" stroke="none"/>
+        <circle cx="6" cy="12" r="1.7" fill="currentColor" stroke="none"/>
+        <path d="M12 2 A10 10 0 1 1 2 12" stroke-width="1.4" opacity=".8"/>
+        <polygon points="2,7.8 0.1,12.2 3.9,12.2" fill="currentColor" stroke="none"/>
+        <circle cx="12" cy="12" r="2.9" stroke-width="1.5"/>
+      </svg>
+      <span class="wordmark">Glyph Shift</span>
+    </div>
+
+    <div class="rail-actions">
+      <button id="soundBtn" class="icon" type="button" aria-pressed="true" aria-label="効果音を切る" title="効果音">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" fill="currentColor" stroke="none"/>
+          <path class="wave" d="M15.5 9.2a4 4 0 0 1 0 5.6M18.3 6.6a8 8 0 0 1 0 10.8"/>
+          <path class="mute" d="M16 9.5l5 5M21 9.5l-5 5"/>
+        </svg>
+      </button>
+      <button id="setupBtn" class="icon" type="button" aria-expanded="false" aria-controls="setup" aria-label="盤面の設定を開く" title="盤面の設定">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path d="M3 7h12M19 7h2M3 12h4M11 12h10M3 17h8M15 17h6"/>
+          <circle cx="17" cy="7" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="9" cy="12" r="2" fill="currentColor" stroke="none"/>
+          <circle cx="13" cy="17" r="2" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
+      <button id="menuBtn" class="icon menu-btn" type="button" aria-expanded="false" aria-controls="panel" aria-label="遊び方とブロックを開く" title="遊び方とブロック">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <div class="panel-backdrop" id="panelBackdrop" hidden></div>
+
+  <aside class="panel" id="setup" aria-hidden="true" aria-label="盤面の設定">
+    <div class="panel-head">
+      <h2>盤面の設定</h2>
+      <button id="setupClose" class="panel-close" type="button" aria-label="閉じる">&times;</button>
+    </div>
+    <div class="setup-body">
+      <div class="field">
+        <span class="label">サイズ</span>
+        <div class="seg" id="sizeSeg" role="group" aria-label="盤のサイズ"></div>
+      </div>
+      <div class="field">
+        <span class="label">ブロック数</span>
+        <div class="seg" id="typeSeg" role="group" aria-label="ブロック数"></div>
+        <p class="note" id="typeNote"></p>
+      </div>
+      <div class="field">
+        <span class="label">SEED</span>
+        <input id="seedIn" type="text" inputmode="numeric" placeholder="空ならランダム" aria-label="SEED">
+        <p class="note">同じ SEED を入れると、同じ盤面がもう一度出ます。</p>
+      </div>
+    </div>
+    <button id="createBtn" class="primary wide" type="button">この設定で作成</button>
+  </aside>
+
+  <aside class="panel" id="panel" aria-hidden="true" aria-label="遊び方とブロック">
+    <div class="panel-head">
+      <h2>遊び方とブロック</h2>
+      <button id="panelClose" class="panel-close" type="button" aria-label="閉じる">&times;</button>
+    </div>
+
+    <ol class="howto">
+      <li>絵柄がそのタイルの<strong>能力</strong>。押すと発動し、能力はタイルに付いて一緒に動く。</li>
+      <li>使ったタイル自身は動かない。動くのはまわりのマス。</li>
+      <li>回転は<strong>長押し</strong>（右クリックでも可）で<strong>逆回り</strong>。</li>
+      <li>盤の端はつながっていない。効果が盤の外に出る位置では<strong>使えない</strong>。</li>
+      <li><strong>目標の柄</strong>と同じ並びにすればクリア。同じ絵柄どうしは入れ替え可能。</li>
+    </ol>
+
+    <details class="howto-more">
+      <summary>アイコンの読み方</summary>
+      <ul>
+        <li>薄い点＝周囲のマス、輪＝<strong>自分</strong>（動かない）。</li>
+        <li>濃い点＝効果を受けるマス。</li>
+        <li>線で結ばれた 2 点は<strong>入れ替え</strong>。</li>
+        <li>矢印つきの弧は、その順に<strong>1 つ回す</strong>。</li>
+        <li>線が 2 本重なっているものは、<strong>向かい合う 2 組が同時に入れ替わる</strong>（回転の半分ぶん）。</li>
+      </ul>
+    </details>
+
+    <p class="label panel-sub">ブロック 全 10 種</p>
+    <div class="panel-body" id="panelBody"></div>
+  </aside>
+
+  <main class="stage">
+    <section class="play">
+      <div class="board-frame">
+        <div class="ruler ruler-x" id="rulerX" aria-hidden="true"></div>
+        <div class="ruler ruler-y" id="rulerY" aria-hidden="true"></div>
+        <div class="well">
+          <div class="grid" id="grid"></div>
+        </div>
+      </div>
+
+      <p class="message" id="log">タイルを押して動かす</p>
+
+      <div class="actions">
+        <button id="hintBtn" class="action" type="button" aria-label="次に押すブロックを教える">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18h6M10 21h4"/>
+            <path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.7l.1.5h5.2l.1-.5c.1-.7.4-1.3.9-1.7A6 6 0 0 0 12 3z"/>
+          </svg>
+          ヒント
+        </button>
+        <button id="solveBtn" class="action" type="button" aria-label="自動で揃える">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 12.5 9.5 18 20 6.5"/>
+          </svg>
+          揃える
+        </button>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="card">
+        <h2 class="label">目標の柄</h2>
+        <div class="grid mini" id="goalGrid"></div>
+      </section>
+      <section class="card">
+        <h2 class="label">使うブロック</h2>
+        <ul class="legend" id="legend"></ul>
+      </section>
+      <p class="seed">SEED <code id="seedOut">-</code></p>
+    </aside>
+  </main>
+
+  <div class="modal" id="confirmOverlay" hidden>
+    <div class="modal-card">
+      <h2>自動で揃える</h2>
+      <p>盤面が動いて目標の柄まで揃います。<br>この盤面は自分で解けなくなります。</p>
+      <div class="modal-row">
+        <button id="confirmNo" class="ghost-btn" type="button">やめる</button>
+        <button id="confirmYes" class="primary" type="button">揃える</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="auto-bar" id="autoBar" hidden>
+    <span id="autoText">揃えています…</span>
+    <button id="autoStop" type="button">止める</button>
+  </div>
+
+  <script src="sound.js"></script>
+  <script src="solver.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

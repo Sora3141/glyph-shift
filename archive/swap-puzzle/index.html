@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swap Puzzle</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Swap Puzzle</h1>
+    <p class="lead">行または列を 2 本選んで入れ替え、目標の並びに揃えよう。</p>
+  </header>
+
+  <main>
+    <section class="board-area">
+      <div class="board-wrap">
+        <!-- 列ハンドル -->
+        <div class="handles handles-col" id="colHandles"></div>
+        <!-- 行ハンドル -->
+        <div class="handles handles-row" id="rowHandles"></div>
+        <div class="board" id="board"></div>
+      </div>
+
+      <div class="status">
+        <span class="moves">手数 <strong id="moves">0</strong></span>
+        <span class="hint" id="hint">端のハンドルをクリックして 2 本選択</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <div class="goal-box">
+        <h2>目標</h2>
+        <div class="board goal" id="goal"></div>
+      </div>
+
+      <div class="controls">
+        <label>
+          サイズ
+          <select id="size">
+            <option value="3" selected>3 × 3</option>
+            <option value="4">4 × 4</option>
+            <option value="5">5 × 5</option>
+          </select>
+        </label>
+        <button id="shuffle">シャッフル</button>
+        <button id="reset" class="ghost">やり直す</button>
+      </div>
+
+      <details class="rules">
+        <summary>あそびかた</summary>
+        <ul>
+          <li>盤の上（列）か左（行）のハンドルをクリックして 1 本目を選択。</li>
+          <li>同じ向きのもう 1 本をクリックすると、その 2 本が丸ごと入れ替わる。</li>
+          <li>同じハンドルをもう一度押すと選択解除。</li>
+          <li>目標と同じ並びになればクリア。</li>
+        </ul>
+      </details>
+    </aside>
+  </main>
+
+  <div class="clear-overlay" id="clearOverlay" hidden>
+    <div class="clear-card">
+      <h2>クリア！</h2>
+      <p><strong id="clearMoves">0</strong> 手でそろえました</p>
+      <button id="again">もう一度</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

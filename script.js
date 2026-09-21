@@ -1,0 +1,1287 @@
+// Glyph Shift
+// 各タイルには「能力」が絵柄として描かれている。押すとその能力が発動する。
+// 能力は座標ではなくタイルに属するので、タイルが動けば能力も一緒に動く。
+//
+// 盤の端はつながっていない。効果の及ぶマスが盤の外に出てしまう位置では、
+// そのタイルは能力を使えない（＝押しても何も起きない）。
+//
+// 解けることの保証:
+//   (1) すべての能力は「自分自身は動かさない（周りを動かす）」。
+//   (2) 使えるかどうかは 能力 と 位置 だけで決まる。
+//   発動しても自分は同じマスに残るので、一度使えた手は発動後も必ず使える。
+//   よって同じマスを押し続ければ必ず元の盤面に戻せる = どの手も取り消せる。
+//   完成状態から合法手だけで崩して初期盤面を作るので、完成へ戻る手順が必ず存在する。
+//   同時に「直前に打った手がそのまま残る」ので、手詰まり（合法手ゼロ）にもならない。
+
+let N = 4;
+let SIZE = N * N;
+
+const idx = (x, y) => y * N + x;
+const xOf = (i) => i % N;
+const yOf = (i) => Math.floor(i / N);
+const inB = (x, y) => x >= 0 && x < N && y >= 0 && y < N;
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---- 能力定義 ----
+// cells: 効果を受けるマスを絶対座標 [x, y] のサイクルで返す。
+//        [a, b, c] は a の中身 → b、b → c、c → a という移動（2 個なら入れ替え）。
+//        1 マスでも盤の外に出るか、自分のマスを含む場合は「使えない」と判定される。
+const ABILITIES = [
+  { id: 'swapLR', color: 'hsl(352 38% 74%)', name: '左右の隣どうしを入れ替え',
+    cells: (x, y) => [[[x - 1, y], [x + 1, y]]], motion: 'link-h' },
+
+  { id: 'swapUD', color: 'hsl(22 64% 50%)', name: '上下の隣どうしを入れ替え',
+    cells: (x, y) => [[[x, y - 1], [x, y + 1]]], motion: 'link-v' },
+
+  { id: 'swapD1', color: 'hsl(42 38% 51%)', name: '左上と右下を入れ替え',
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]]], motion: 'link-d1' },
+
+  { id: 'swapD2', color: 'hsl(62 56% 50%)', name: '右上と左下を入れ替え',
+    cells: (x, y) => [[[x + 1, y - 1], [x - 1, y + 1]]], motion: 'link-d2' },
+
+  { id: 'crossCW', color: 'hsl(92 59% 76%)', name: '上下左右の 4 マスを時計回り',
+    cells: (x, y) => [[[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]]], motion: 'cw' },
+
+  { id: 'diagCW', color: 'hsl(135 54% 50%)', name: '斜め 4 マスを時計回り',
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y - 1], [x + 1, y + 1], [x - 1, y + 1]]], motion: 'cw' },
+
+  { id: 'ringCW', color: 'hsl(168 68% 50%)', name: '周囲 8 マスを時計回り',
+    cells: (x, y) => [[[x - 1, y - 1], [x, y - 1], [x + 1, y - 1], [x + 1, y],
+                       [x + 1, y + 1], [x, y + 1], [x - 1, y + 1], [x - 1, y]]], motion: 'cw' },
+
+  // 以下は回転の半分ぶん。向かい合うマスどうしが同時に入れ替わる。
+  // それぞれ crossCW を 2 回、diagCW を 2 回、ringCW を 4 回使ったのと同じ動き。
+  { id: 'crossHalf', color: 'hsl(192 46% 73%)', name: '上下と左右を同時に入れ替え',
+    cells: (x, y) => [[[x, y - 1], [x, y + 1]], [[x + 1, y], [x - 1, y]]], motion: 'half-cross' },
+
+  { id: 'diagHalf', color: 'hsl(215 43% 55%)', name: '斜めの対角どうしを同時に入れ替え',
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x + 1, y - 1], [x - 1, y + 1]]], motion: 'half-diag' },
+
+  { id: 'ringHalf', color: 'hsl(315 40% 57%)', name: '周囲 8 マスを向かいどうしで入れ替え',
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x, y - 1], [x, y + 1]],
+                      [[x + 1, y - 1], [x - 1, y + 1]], [[x + 1, y], [x - 1, y]]], motion: 'half-ring' },
+
+];
+
+// 説明パネル用。系統と、効果および使える条件のくわしい説明。
+const FAMILIES = [
+  { key: 'swap', label: '入れ替え' },
+  { key: 'rot',  label: '回転' },
+  { key: 'half', label: '半回転' },
+];
+
+const INFO = {
+  swapLR: { fam: 'swap', text: '自分の左隣と右隣を入れ替える。自分は真ん中に残る。左右どちらかの隣が盤の外になる左端・右端の列では使えない。' },
+  swapUD: { fam: 'swap', text: '自分の上と下を入れ替える。自分は真ん中に残る。上下どちらかが盤の外になる最上段・最下段では使えない。' },
+  swapD1: { fam: 'swap', text: '自分の左上と右下を入れ替える。左端・右端の列と、最上段・最下段では使えない。' },
+  swapD2: { fam: 'swap', text: '自分の右上と左下を入れ替える。左端・右端の列と、最上段・最下段では使えない。' },
+  crossCW: { fam: 'rot', text: '上・右・下・左の 4 マスを、その順に 1 つずつ送る。上の中身が右へ、右が下へ、下が左へ、左が上へ。4 方向すべてが盤内である必要がある。' },
+  diagCW: { fam: 'rot', text: '左上・右上・右下・左下の 4 マスを、その順に 1 つずつ送る。斜め 4 方向すべてが盤内である必要がある。' },
+  ringCW: { fam: 'rot', text: '自分を囲む 8 マス全部を時計回りに 1 つずつ送る。一度に動く数が最も多い。盤の内側でしか使えない。' },
+  crossHalf: { fam: 'half', text: '上と下、右と左を同時に入れ替える。上下左右を時計回りに 2 回送ったのと同じ動き。4 方向すべてが盤内である必要がある。' },
+  diagHalf: { fam: 'half', text: '左上と右下、右上と左下を同時に入れ替える。斜め 4 マスを時計回りに 2 回送ったのと同じ動き。斜め 4 方向すべてが盤内である必要がある。' },
+  ringHalf: { fam: 'half', text: '自分を囲む 8 マスを、向かい合うものどうしで一斉に入れ替える。周囲 8 マスを時計回りに 4 回送ったのと同じ動き。盤の内側でしか使えない。' },
+};
+
+// 能力が使えるなら影響するマスのサイクルを、使えないなら null を返す
+function cyclesOf(abIndex, x, y) {
+  const self = idx(x, y);
+  const out = [];
+  for (const cyc of ABILITIES[abIndex].cells(x, y, N)) {
+    const mapped = [];
+    for (const [cx, cy] of cyc) {
+      if (!inB(cx, cy)) return null;       // 盤の外 → 使えない
+      const c = idx(cx, cy);
+      if (c === self) return null;         // 自分が動いてしまう → 使えない
+      mapped.push(c);
+    }
+    out.push(mapped);
+  }
+  return out;
+}
+
+// ---- アイコン描画 ----
+// 点は 3×3 の模式図。輪が自分（動かない）、濃い点が効果を受けるマス。
+// 回転の弧は点の外側を通し、行／列の端を指す印は外周に置いて、点と重ならないようにする。
+const P = (d) => 12 + d * 6; // -1, 0, 1 → 6, 12, 18
+
+const ICON_DOTS = {
+  swapLR: [[-1, 0], [1, 0]],
+  swapUD: [[0, -1], [0, 1]],
+  swapD1: [[-1, -1], [1, 1]],
+  swapD2: [[1, -1], [-1, 1]],
+  crossCW: [[0, -1], [1, 0], [0, 1], [-1, 0]],
+  diagCW: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
+  ringCW: [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]],
+  crossHalf: [[0, -1], [1, 0], [0, 1], [-1, 0]],
+  diagHalf: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
+  ringHalf: [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]],
+};
+
+const MOTION = {
+  // 入れ替え: 2 点を結ぶ線。中央の輪を避けて膨らませる
+  'link-h': '<path d="M6 12 Q12 5 18 12" stroke-width="1.3" opacity=".7"/>',
+  'link-v': '<path d="M12 6 Q19 12 12 18" stroke-width="1.3" opacity=".7"/>',
+  'link-d1': '<path d="M6 6 Q19 5 18 18" stroke-width="1.3" opacity=".7"/>',
+  'link-d2': '<path d="M18 6 Q5 5 6 18" stroke-width="1.3" opacity=".7"/>',
+  // 回転: 点より外側を回る 3/4 円 + 進行方向の矢じり（時計回りのみ）
+  'cw': '<path d="M12 2 A10 10 0 1 1 2 12" stroke-width="1.3" opacity=".8"/>'
+      + '<polygon points="2,7.8 0.1,12.2 3.9,12.2" fill="currentColor" stroke="none"/>',
+  // 半回転: 向かい合う 2 点を中心ごしに結ぶ。中心の輪の手前で切って、
+  // 「自分を挟んで反対どうしが入れ替わる」ことを線の向きで示す。
+  // 入れ替えの弧（1 本）と見分けがつくよう、こちらは直線で描く。
+  'half-cross': '<path d="M12 6.6 V8.6 M12 15.4 V17.4 M6.6 12 H8.6 M15.4 12 H17.4"'
+              + ' stroke-width="1.5" opacity=".8"/>',
+  'half-diag': '<path d="M7.6 7.6 L9.9 9.9 M14.1 14.1 L16.4 16.4'
+             + ' M16.4 7.6 L14.1 9.9 M9.9 14.1 L7.6 16.4" stroke-width="1.5" opacity=".8"/>',
+  'half-ring': '<path d="M12 6.6 V8.6 M12 15.4 V17.4 M6.6 12 H8.6 M15.4 12 H17.4'
+             + ' M7.6 7.6 L9.9 9.9 M14.1 14.1 L16.4 16.4'
+             + ' M16.4 7.6 L14.1 9.9 M9.9 14.1 L7.6 16.4" stroke-width="1.5" opacity=".8"/>',
+};
+
+function iconSvg(abIndex) {
+  const ab = ABILITIES[abIndex];
+  const parts = [];
+  for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+    if (dx === 0 && dy === 0) continue;
+    parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.1" fill="currentColor" stroke="none" opacity=".2"/>`);
+  }
+  parts.push(MOTION[ab.motion]); // 弧や矢印は点の下に敷く
+  for (const [dx, dy] of ICON_DOTS[ab.id]) {
+    parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="2.2" fill="currentColor" stroke="none"/>`);
+  }
+  parts.push('<circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"/>');
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">${parts.join('')}</svg>`;
+}
+
+// 色は能力に固定せず、盤面ごとに割り当てる。
+// 能力が 10 種あるので固定の色相だと近い色が同居しうるが、柄合わせでは
+// 色の見分けやすさが最優先なので、使う分だけ等間隔に配る。
+// UI のアクセント（菫色）と紛れないよう、その帯は飛ばす。
+// 色は能力ごとに固定する。長く遊ぶと色でブロックを覚えられるようにするため。
+// 10 種あるので色相だけでは詰まる。色相は保ったまま彩度と明度を探索で調整し、
+// いちばん近い 2 色の知覚的な差（CIELAB の ΔE）を 37 まで広げてある。
+// 彩度は 72% までに抑えて、画面が毒々しくならないようにしている。
+// UI のアクセントと紛れる菫色の帯（248〜292°）は使っていない。
+const bgOf = (abIndex) => ABILITIES[abIndex].color;
+const INK = 'rgba(10, 12, 20, .82)';
+
+// ---- 柄（目標の並び） ----
+// 盤のサイズ N と使うブロック数 K から作れる柄。fn は各マスの色番号（0〜K-1）を返す。
+// 先に柄を決めてから、その柄が必要とする個数ぶんだけブロックを用意するので、
+// 目標はつねに実際に作れる配置になる。
+const PATTERNS = [
+  { id: 'diag',   ok: () => true,
+    label: (k) => (k === 2 ? '市松模様' : '斜めじま'),
+    fn: (x, y, n, k) => (x + y) % k },
+
+  { id: 'bands',  ok: (n, k) => n >= k * 2,
+    label: () => '太い斜めじま',
+    fn: (x, y, n, k) => Math.floor((x + y) / 2) % k },
+
+  { id: 'rows',   ok: () => true,
+    label: () => '横じま',
+    fn: (x, y, n, k) => y % k },
+
+  { id: 'cols',   ok: () => true,
+    label: () => '縦じま',
+    fn: (x, y, n, k) => x % k },
+
+  { id: 'rings',  ok: (n, k) => Math.ceil(n / 2) >= k,
+    label: () => '同心の枠',
+    fn: (x, y, n, k) => Math.min(x, y, n - 1 - x, n - 1 - y) % k },
+
+  { id: 'frame',  ok: (n, k) => k === 2 && n >= 3,
+    label: () => '額縁',
+    fn: (x, y, n) => (x === 0 || y === 0 || x === n - 1 || y === n - 1 ? 0 : 1) },
+
+  { id: 'halves', ok: (n, k) => k === 2,
+    label: () => '上下二分割',
+    fn: (x, y, n) => (y >= Math.floor(n / 2) ? 1 : 0) },
+
+  { id: 'quads',  ok: (n, k) => k === 4,
+    label: () => '四分割',
+    fn: (x, y, n) => (y >= Math.floor(n / 2) ? 2 : 0) + (x >= Math.floor(n / 2) ? 1 : 0) },
+];
+
+// 予備の並べ方。左上から順に色を送っていくだけで柄とは呼べないが、
+// マス数さえ足りれば必ず全色が出る。正規の柄が 1 つも作れないときだけ使う。
+const FALLBACK = {
+  id: 'serial',
+  ok: (n, k) => k <= n * n,
+  label: () => '順送り',
+  fn: (x, y, n, k) => (y * n + x) % k,
+};
+
+// このサイズとブロック数で実際に作れる柄を洗い出す。
+// ・全色が出ない柄は除外（盤に対して色数が多いと色が余る）
+// ・配置が完全に一致する柄は 1 つにまとめる
+//   （例: 4×4 では「額縁」と「同心の枠」が同じ配置になり、
+//     両方残すとその柄だけ 2 倍の確率で出てしまう）
+function candidatePatterns(n, k) {
+  const out = [];
+  const seen = new Set();
+  for (const p of PATTERNS) {
+    if (!p.ok(n, k)) continue;
+    const layout = Array.from({ length: n * n }, (_, i) => p.fn(i % n, Math.floor(i / n), n, k));
+    if (new Set(layout).size !== k) continue;
+    const sig = layout.join(',');
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(p);
+  }
+  // 小さい盤に色数が多いと、どの柄も全色を出せないことがある。
+  // その場合だけ予備の並べ方に落として、組み合わせ自体は選べるようにする。
+  if (!out.length && FALLBACK.ok(n, k)) out.push(FALLBACK);
+  return out;
+}
+
+// 選べる盤のサイズとブロック数
+const SIZES = [4, 5, 6, 7, 8, 9, 10];
+const TYPE_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+// そのサイズで、そのブロック数の柄が作れるか
+const typeAvailable = (n, k) => k <= ABILITIES.length && k <= n * n && candidatePatterns(n, k).length > 0;
+
+// ---- 状態 ----
+// 完成状態から混ぜる手数。
+// 一様分布に十分近づくまで混ぜる。厳密に測った混合時間の最大はマス数あたり 82 手
+// （4×4 3 色、到達状態 36,450）だったので、2 倍以上の余裕を見て 200 倍とする。
+// 1 手は配列の置換だけなので、10×10 の 20,000 手でも数ミリ秒で終わる。
+const scrambleSteps = () => 200 * SIZE;
+
+let types = 2;          // 使うブロック数
+let seed = 0;
+let tileAbility = [];  // tileAbility[v] = タイル v の能力インデックス
+let board = [];        // board[i] = マス i にあるタイルの値
+// 手数は「押した回数」ではなく「正味の操作量」で数える。
+// 同じマスを連続で押している間は 1 つのまとまり（run）として扱い、
+// 位数 k の能力を j 回押したぶんのコストを min(j mod k, k - j mod k) とする。
+// 例: 時計回り 4 マス回転（位数 4）を 3 回 → 反時計回り 1 回ぶんなので 1 手。
+//     入れ替え（位数 2）を 2 回 → 元に戻るので 0 手。
+let moves = 0;   // 確定済みの手数（完成時にだけ表示する）
+let run = { i: -1, d: 0, order: 1 };
+
+// 解答例。{ i: マス, n: 押す回数, order: 位数 } の並びで、
+// 先頭から順に押していけば必ず目標の柄になる。
+// プレイヤーが手を打つたびに追従させるので、途中からでも有効。
+let solution = [];
+let locked = false;
+
+const slots = [];
+const tiles = [];
+
+const gridEl = document.getElementById('grid');
+const goalGridEl = document.getElementById('goalGrid');
+const legendEl = document.getElementById('legend');
+const seedOutEl = document.getElementById('seedOut');
+const logEl = document.getElementById('log');
+
+const abilityAt = (i) => tileAbility[board[i]];
+const cyclesAt = (i) => cyclesOf(abilityAt(i), xOf(i), yOf(i));
+
+// 目標は「タイル v がマス v にある」状態。ただし同じ能力のタイルは互換なので、
+// 並びが目標と同じ絵柄になっていればクリアとする。
+const isSolved = () => board.every((_, i) => abilityAt(i) === tileAbility[i]);
+
+const legalCells = () => {
+  const out = [];
+  for (let i = 0; i < SIZE; i++) if (cyclesAt(i)) out.push(i);
+  return out;
+};
+
+// ---- DOM ----
+function buildDom() {
+  // --n と --cell はルートに置く。盤面エリアの幅計算（style.css）からも参照するため。
+  document.documentElement.style.setProperty('--n', N);
+  const cell = N >= 9 ? 46 : N >= 7 ? 54 : N === 6 ? 64 : 72;
+  document.documentElement.style.setProperty('--cell', `${cell}px`);
+  // 目標の柄はサイドバー（250px）に収める
+  document.documentElement.style.setProperty('--mini-cell', `${Math.min(30, Math.floor((228 - 4 * (N - 1)) / N))}px`);
+  gridEl.replaceChildren();
+  slots.length = 0;
+  tiles.length = 0;
+
+  for (let i = 0; i < SIZE; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    slot.dataset.i = String(i);
+    gridEl.append(slot);
+    slots[i] = slot;
+  }
+  for (let v = 0; v < SIZE; v++) {
+    const t = document.createElement('div');
+    t.className = 'tile';
+    tiles[v] = t;
+  }
+
+  // 行・列の目盛り。ヒントが「3 列目・4 行目」と言うので、位置を数えずに済む。
+  for (const [el, n] of [[document.getElementById('rulerX'), N], [document.getElementById('rulerY'), N]]) {
+    el.replaceChildren();
+    for (let k = 1; k <= n; k++) {
+      const s = document.createElement('span');
+      s.textContent = String(k);
+      el.append(s);
+    }
+  }
+}
+
+function paintTiles() {
+  for (let v = 0; v < SIZE; v++) {
+    const ab = tileAbility[v];
+    tiles[v].style.background = bgOf(ab);
+    tiles[v].style.color = INK;
+    tiles[v].innerHTML = iconSvg(ab);
+  }
+}
+
+function placeTiles() {
+  // 同じスロットにいるタイルは触らない。ノードを挿入し直すと
+  // そのタイルの CSS アニメーションが再生されてしまうため。
+  for (let i = 0; i < SIZE; i++) {
+    const t = tiles[board[i]];
+    if (t.parentNode !== slots[i]) slots[i].append(t);
+  }
+}
+
+// 端に寄っていて能力を使えないタイルを暗くする
+function markUsable() {
+  let usable = 0;
+  for (let i = 0; i < SIZE; i++) {
+    const t = tiles[board[i]];
+    if (cyclesAt(i)) { t.classList.remove('off'); t.title = ABILITIES[abilityAt(i)].name; usable++; }
+    else { t.classList.add('off'); t.title = `${ABILITIES[abilityAt(i)].name}（この位置では盤の外に出るので使えない）`; }
+  }
+  return usable;
+}
+
+function renderGoal() {
+  goalGridEl.replaceChildren();
+  for (let i = 0; i < SIZE; i++) {
+    const slot = document.createElement('div');
+    slot.className = 'slot';
+    const t = document.createElement('div');
+    t.className = 'tile';
+    t.style.background = bgOf(tileAbility[i]);
+    t.style.color = INK;
+    t.innerHTML = iconSvg(tileAbility[i]);
+    slot.append(t);
+    goalGridEl.append(slot);
+  }
+}
+
+function renderLegend() {
+  legendEl.replaceChildren();
+  for (const ab of [...new Set(tileAbility)].sort((a, b) => a - b)) {
+    const li = document.createElement('li');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.style.background = bgOf(ab);
+    chip.style.color = INK;
+    chip.innerHTML = iconSvg(ab);
+    const txt = document.createElement('span');
+    txt.textContent = ABILITIES[ab].name;
+    li.append(chip, txt);
+    legendEl.append(li);
+  }
+}
+
+// ---- ヒント ----
+// 押したときに一度だけ、次に押すべきマスを点滅させる。状態は持たない。
+const HINT_BLINK_MS = 2600;
+let hintTimer = null;
+
+function clearHint() {
+  if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+  for (const slot of slots) slot.classList.remove('hinted');
+}
+
+function blinkHint() {
+  clearHint();
+  if (locked || isSolved() || autoSolving) return;
+  const plan = activeRuns();
+  if (!plan.length) return;
+  const r = plan[0];
+  slots[r.i].classList.add('hinted');
+  const back = r.order - r.n;
+  const how = r.n <= back
+    ? `光っているマスを ${r.n} 回押す`
+    : `光っているマスを ${back} 回長押し（逆回り）`;
+  // 最短だと確定できたかどうかも伝える
+  const left = planCost(plan);
+  const quality = !hintPlan ? ''
+    : hintPlan.optimal ? ` / ここから最短 ${left} 手`
+    : ` / 残り ${left} 手（最短とはかぎりません）`;
+  logEl.textContent = how + quality;
+  hintTimer = setTimeout(clearHint, HINT_BLINK_MS);
+}
+
+function showHint() {
+  if (autoSolving || locked || isSolved()) return;
+  Sfx.hint();
+  blinkHint();                // まず今わかっている手をすぐ点滅させる
+  requestSolve(blinkHint);    // 探索が終わったら対象を更新する
+}
+
+// ---- 説明パネル ----
+function renderPanel() {
+  const body = document.getElementById('panelBody');
+  const used = new Set(tileAbility);
+  body.replaceChildren();
+
+  for (const fam of FAMILIES) {
+    const ids = ABILITIES.map((ab, k) => [ab, k]).filter(([ab]) => INFO[ab.id].fam === fam.key);
+    const sec = document.createElement('section');
+    const h = document.createElement('p');
+    h.className = 'fam-title';
+    h.textContent = `${fam.label}（${ids.length} 種）`;
+    const list = document.createElement('div');
+    list.className = 'fam-list';
+
+    for (const [ab, k] of ids) {
+      const row = document.createElement('div');
+      row.className = used.has(k) ? 'blk' : 'blk dim';
+
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = bgOf(k);
+      chip.style.color = INK;
+      chip.innerHTML = iconSvg(k);
+
+      const main = document.createElement('div');
+      main.className = 'blk-main';
+
+      const name = document.createElement('div');
+      name.className = 'blk-name';
+      name.append(ab.name);
+      if (used.has(k)) {
+        const tag = document.createElement('span');
+        tag.className = 'used';
+        tag.textContent = 'このパズルで使用中';
+        name.append(tag);
+      }
+
+      const detail = document.createElement('p');
+      detail.className = 'blk-detail';
+      detail.textContent = INFO[ab.id].text;
+
+      // このサイズの盤で使える位置
+      const where = document.createElement('div');
+      where.className = 'blk-where';
+      const map = document.createElement('div');
+      map.className = 'blk-map';
+      map.style.gridTemplateColumns = `repeat(${N}, 8px)`;
+      let on = 0;
+      for (let i = 0; i < SIZE; i++) {
+        const cell = document.createElement('i');
+        if (cyclesOf(k, xOf(i), yOf(i))) { cell.className = 'on'; on++; }
+        map.append(cell);
+      }
+      const note = document.createElement('span');
+      note.textContent = `使える位置 ${on} / ${SIZE}`;
+      map.setAttribute('role', 'img');
+      map.setAttribute('aria-label', `${N}×${N} の盤で使える位置は ${on} マス`);
+      where.append(map, note);
+
+      main.append(name, detail, where);
+      row.append(chip, main);
+      list.append(row);
+    }
+    sec.append(h, list);
+    body.append(sec);
+  }
+}
+
+// ---- 置換の適用（FLIP アニメーション付き） ----
+function applyTo(b, cycles, dir = 1) {
+  for (const cyc of cycles) {
+    if (dir > 0) {
+      const last = b[cyc[cyc.length - 1]];
+      for (let k = cyc.length - 1; k > 0; k--) b[cyc[k]] = b[cyc[k - 1]];
+      b[cyc[0]] = last;
+    } else {
+      const first = b[cyc[0]];
+      for (let k = 0; k < cyc.length - 1; k++) b[cyc[k]] = b[cyc[k + 1]];
+      b[cyc[cyc.length - 1]] = first;
+    }
+  }
+}
+
+// 盤面を書き換えて、動いたタイルだけを滑らせる
+function animatePlacement(mutate) {
+  const before = new Map();
+  for (const t of tiles) {
+    // 前の手のアニメーションが残っていると変形後の座標を測ってしまい、
+    // 動いていないタイルにも差分が出て震える。測る前に必ず打ち切る。
+    for (const a of t.getAnimations()) a.cancel();
+    before.set(t, t.getBoundingClientRect());
+  }
+
+  mutate();
+  placeTiles();
+  markUsable();
+
+  for (const t of tiles) {
+    const a = before.get(t);
+    const b = t.getBoundingClientRect();
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+    if (!dx && !dy) continue;
+    t.animate(
+      [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+      { duration: 300, easing: 'cubic-bezier(.2,.75,.3,1)' }
+    );
+  }
+}
+
+const applyAnimated = (cycles, dir = 1) => animatePlacement(() => applyTo(board, cycles, dir));
+
+// 発動したマスを光らせる。スロットは動かないのでクラスで問題ない。
+function flashSlot(i, dir = 1) {
+  slots[i].classList.remove('fired', 'back');
+  void slots[i].offsetWidth; // アニメーション再生のための reflow
+  slots[i].classList.add('fired');
+  if (dir < 0) slots[i].classList.add('back');
+}
+
+// 使えないマスを揺らす。クラスを付けっぱなしにすると、あとでタイルが
+// 動くたびにノード再挿入でアニメーションが再生されてしまうため、
+// クラスではなくアニメーション API を使って痕跡を残さない。
+function shakeTile(i) {
+  const t = tiles[board[i]];
+  for (const a of t.getAnimations()) a.cancel();
+  t.animate(
+    [{ transform: 'translateX(0)' }, { transform: 'translateX(-4px)' },
+     { transform: 'translateX(4px)' }, { transform: 'translateX(0)' }],
+    { duration: 300, easing: 'ease' }
+  );
+}
+
+// ---- 手数 ----
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+const lcm = (a, b) => (a / gcd(a, b)) * b;
+
+// 置換の位数（何回繰り返すと元に戻るか）= 各サイクル長の最小公倍数
+const orderOf = (cycles) => cycles.reduce((a, c) => lcm(a, c.length), 1);
+
+// 連続押しのまとまりを確定して手数に加える。
+// d は向きこみの累計（押すたび +1、長押しは -1）。位数で丸めて、近い側を手数とする。
+function commitRun() {
+  if (run.d !== 0) {
+    const r = ((run.d % run.order) + run.order) % run.order;
+    moves += Math.min(r, run.order - r);
+  }
+  run = { i: -1, d: 0, order: 1 };
+}
+
+// ---- 解答例 ----
+// プレイヤーが 1 手打ったぶんを手順に反映する。
+// 手順の先頭と同じマスなら 1 回ぶん消化、違うマスなら打ち消す手順を先頭に足す。
+// これで「先頭から順に押せば解ける」という性質が常に保たれる。
+// runs[k].n は「そのマスをあと何回“順方向に”進めればよいか」。
+// 長押し（dir = -1）は逆向きに 1 つ進めたことになるので、残りは 1 増える。
+function advanceRuns(runs, i, dir, order) {
+  const wrap = (v) => ((v % order) + order) % order;
+  const first = runs[0];
+  if (first && first.i === i) {
+    first.n = wrap(first.n - dir);
+    if (first.n === 0) runs.shift();
+  } else {
+    runs.unshift({ i, n: wrap(-dir), order });
+  }
+}
+
+// ---- 探索による手順（solver.js） ----
+// 解法は solver.js の純粋な関数。通常は Web Worker の中で動かし、画面を止めない。
+// Worker が作れない環境では同じ関数をメインスレッドで短い予算で呼ぶ。
+// 見つかれば最短、無理なら短くした一例。使えないときは逆手順のまま。
+const Solver = solverModule();
+
+// 盤面ごとの「問題の記述」。能力 × マスのサイクルと位数を先に引いておく。
+function buildProblem() {
+  const cyc = [], ord = [];
+  for (let a = 0; a < ABILITIES.length; a++) {
+    const per = Array.from({ length: SIZE }, (_, i) => cyclesOf(a, xOf(i), yOf(i)));
+    cyc.push(per);
+    ord.push(per.map((c) => (c ? orderOf(c) : 0)));
+  }
+  return { N, SIZE, cyc, ord };
+}
+
+let problem = null;
+let hintPlan = null;    // { runs, optimal, ms, method }
+let hintBusy = false;
+let solveId = 0;        // 進行中の依頼の番号。盤面が変わったら古い返事を捨てる
+let solveDones = [];    // 返事が来たら呼ぶもの
+let movesWhileSolving = []; // 計算中に打った手。返ってきた手順に追いつかせる
+let solveStart = null;      // 依頼したときの並び。返ってきた手順はここから始まる
+
+// Worker の中で長めに探索する。同期で動かすときは画面が固まるので短くする。
+const HINT_BUDGET_WORKER = 3000;
+const HINT_BUDGET_SYNC = 1200;
+
+let worker = null;
+let workerBroken = false;   // この環境では Worker が使えないと分かったら、もう試さない
+
+function makeWorker() {
+  if (worker) { worker.terminate(); worker = null; }
+  if (workerBroken) return;
+  if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') return;
+  try {
+    const src = `${solverModule.toString()}\n${solverWorkerMain.toString()}\nsolverWorkerMain();`;
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    worker.onmessage = (e) => finishSolve(e.data.id, e.data.res, !!e.data.partial);
+    worker.onerror = () => { worker = null; workerBroken = true; fallbackToSync(); };
+  } catch (e) {
+    worker = null;
+    workerBroken = true;
+  }
+}
+
+// Worker が使えなくなったときに、待っている依頼を同期で片付ける。
+// そのままだと待ち手が誰にも応えられず、ヒントも「揃える」も無反応になる。
+function fallbackToSync() {
+  if (!hintBusy) return;
+  hintBusy = false;
+  const pending = solveDones;
+  solveDones = [];
+  if (!pending.length) return;
+  const first = pending.shift();
+  solveDones = pending;
+  requestSolve(first.f, first.final);
+}
+
+function solveSnapshot() {
+  return {
+    start: Uint8Array.from({ length: SIZE }, (_, i) => tileAbility[board[i]]),
+    goal: Uint8Array.from({ length: SIZE }, (_, i) => tileAbility[i]),
+    fallback: Solver.runsToPlan(solution),
+  };
+}
+
+// 返事を受け取る。途中経過（partial）なら手順だけ差し替えて、計算は続いているものとして扱う。
+function finishSolve(id, res, partial = false) {
+  if (id !== solveId) return; // 盤面が変わった後の返事
+  if (res && res.plan) {
+    const plan = { runs: Solver.planToRuns(problem, res.plan, solveStart), optimal: res.optimal, ms: Math.round(res.ms), method: res.method };
+    // 計算しているあいだに打った手ぶんだけ手順を進める
+    for (const [i, dir, order] of movesWhileSolving) followPlan(plan, i, dir, order);
+    if (!hintPlan || planCost(plan.runs) <= planCost(hintPlan.runs) || !partial) hintPlan = plan;
+  }
+  if (!partial) { hintBusy = false; movesWhileSolving = []; }
+  // 待っている人には最初の返事で応える（ヒントの点滅には十分）。最終結果を待つものは残す。
+  const dones = solveDones;
+  solveDones = partial ? dones.filter((d) => d.final) : [];
+  for (const d of dones) if (!partial || !d.final) d.f();
+}
+
+// done は最初の返事（途中経過でもよい）で呼ぶ。final を付けると最終結果まで待つ。
+function requestSolve(done, final = false, background = false) {
+  if (done) solveDones.push({ f: done, final });
+  if (hintBusy) return;
+  // Worker が無い環境では同期で解くことになる。先読みのためだけに
+  // 盤面を出すたび画面を止めるのは割に合わないので、そのときは見送る。
+  if (background && !worker) return;
+  hintBusy = true;
+  const id = ++solveId;
+  movesWhileSolving = [];
+  const snap = solveSnapshot();
+  solveStart = snap.start;
+  if (worker) {
+    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: HINT_BUDGET_WORKER, fallback: snap.fallback });
+    // 返事が来ないまま黙り込む環境（file:// で Blob の Worker が止められる等）への保険
+    setTimeout(() => {
+      if (!hintBusy || solveId !== id) return;
+      if (worker) { worker.terminate(); worker = null; }
+      workerBroken = true;
+      fallbackToSync();
+    }, HINT_BUDGET_WORKER + 2000);
+  } else {
+    // 同期処理なので、呼び出し側が先に画面を描けるよう一拍ずらす
+    setTimeout(() => finishSolve(id, Solver.solvePuzzle(problem, snap.start, snap.goal, HINT_BUDGET_SYNC, snap.fallback)), 16);
+  }
+}
+
+// 手順の持ち主（hintPlan）に 1 手を反映する。手順どおりでなければ「最短」の看板を下ろす。
+function followPlan(plan, i, dir, order) {
+  const before = planCost(plan.runs);
+  advanceRuns(plan.runs, i, dir, order);
+  if (planCost(plan.runs) >= before) plan.optimal = false;
+}
+
+const activeRuns = () => (hintPlan ? hintPlan.runs : solution);
+
+// 手順の長さは「まとまりの数」ではなく手数で数える。
+// 1 つのまとまりは押す向きを選べるので、少ない側の回数がその手数になる。
+const planCost = (runs) => runs.reduce((a, r) => a + Math.min(r.n, r.order - r.n), 0);
+
+// ---- 操作 ----
+// dir: +1 = 押す（順方向） / -1 = 長押し（逆方向）
+// 1 手ぶんの状態更新だけを行う。描画と音は呼び出し側でまとめる。
+// 自動再生では何手かをひとまとめに動かすので、ここを分けておく。
+function applyMoveState(i, dir) {
+  const cycles = cyclesAt(i);
+  if (!cycles) return false;
+  // 押したマスが変わったら、それまでの連続押しを確定する
+  if (i !== run.i) {
+    commitRun();
+    run = { i, d: 0, order: orderOf(cycles) };
+  }
+  run.d += dir;
+
+  advanceRuns(solution, i, dir, run.order);
+  if (hintPlan) followPlan(hintPlan, i, dir, run.order);
+  if (hintBusy) movesWhileSolving.push([i, dir, run.order]);
+
+  applyTo(board, cycles, dir);
+  return true;
+}
+
+function fire(i, dir = 1) {
+  if (locked) return;
+  if (!cyclesAt(i)) {
+    shakeTile(i);
+    Sfx.blocked();
+    logEl.textContent = '盤の外に出てしまうので、この位置では使えない';
+    return;
+  }
+  const ab = abilityAt(i);   // 使ったタイルは動かないので、前後で変わらない
+  animatePlacement(() => applyMoveState(i, dir));
+  flashSlot(i, dir);
+  Sfx.move(ab, dir);
+  logEl.textContent = ABILITIES[ab].name + (dir < 0 ? '（逆回り）' : '');
+  clearHint(); // 示した手はもう古いので消す
+  if (isSolved()) showClear();
+}
+
+
+// 完成の知らせ。盤面を隠さないよう、全画面では出さない。
+function showClear() {
+  commitRun();
+  Sfx.solved();
+  locked = true;
+  stopAutoSolve();
+  clearHint();
+
+  gridEl.classList.remove('cleared');
+  void gridEl.offsetWidth; // アニメーション再生のための reflow
+  gridEl.classList.add('cleared');
+
+  logEl.classList.add('done');
+  logEl.textContent = autoSolvedFlag
+    ? 'そろった！（自動で揃えました） — 設定から次の盤面を作れます'
+    : `そろった！ ${moves} 手 — 設定から次の盤面を作れます`;
+}
+
+// ---- 自動で揃える ----
+// 手順どおりに 1 手ずつ押していく。1 手ごとに手順を読み直すので、
+// 途中で解き直しが入っても破綻しない。
+let autoSolving = false;
+let autoStep = null;   // 始めるときに決めた進め方 { interval, chunk }
+let autoSolvedFlag = false;
+let autoTimer = null;
+
+// 1 手ずつ見せられる上限。これを超える手順は一気に揃える。
+// 混ぜ切った大きい盤では、保険の手順が数千〜数万手になることがあるため。
+// どの盤面でも順に揃える。ただし保険の手順は 1 万手を超えることがあるので、
+// 1 手ずつ止まっていると終わらない。飛ばさずに、長いほど 1 回で多く進めて速くする。
+// 目安としてだいたいこの時間で終わる。
+const AUTO_TOTAL_MS = 18000;
+
+// ペースは始めるときに一度だけ決める。毎回の残りから決め直すと、
+// 終盤が 1 手ずつの遅い進みになって全体が何倍にも延びる。
+function autoPace(total) {
+  const interval = total <= 60 ? 340 : 120;
+  const ticks = Math.max(1, Math.round(AUTO_TOTAL_MS / interval));
+  return { interval, chunk: Math.max(1, Math.ceil(total / ticks)) };
+}
+
+const confirmEl = document.getElementById('confirmOverlay');
+const autoBarEl = document.getElementById('autoBar');
+const autoTextEl = document.getElementById('autoText');
+
+function askAutoSolve() {
+  if (autoSolving || locked) return;
+  confirmEl.hidden = false;
+  document.getElementById('confirmNo').focus();
+}
+
+function startAutoSolve() {
+  confirmEl.hidden = true;
+  if (autoSolving || locked) return;
+  // 手順の計算が終わるまで入力を受けないよう、先に自動モードに入る
+  autoSolving = true;
+  autoBarEl.hidden = false;
+  autoTextEl.textContent = '手順を計算しています…';
+  requestSolve(() => {
+    if (!autoSolving) return;              // 計算中に「止める」を押した
+    if (locked || isSolved()) { stopAutoSolve(); return; }
+    autoSolvedFlag = true;
+    // 手順がまったく無いときだけは、そのまま完成形へ動かす
+    if (!activeRuns().length) { stopAutoSolve(); snapToGoal(); return; }
+    autoStep = autoPace(planCost(activeRuns()));
+    stepAuto();
+  }, true);
+}
+
+function stepAuto() {
+  if (!autoSolving) return;
+  const plan = activeRuns();
+  if (locked || isSolved() || !plan.length) { stopAutoSolve(); return; }
+
+  const left = planCost(plan);
+  if (!autoStep) autoStep = autoPace(left);
+  const { interval, chunk } = autoStep;
+  autoTextEl.textContent = `揃えています… 残り ${left} 手`;
+
+  // まとめて進めるぶんも 1 回の滑らかな移動として見せる。
+  // 手順の順番どおりに進むので、揃っていく過程はそのまま見える。
+  let last = null;
+  animatePlacement(() => {
+    for (let c = 0; c < chunk; c++) {
+      const runs = activeRuns();
+      if (!runs.length) break;
+      const r = runs[0];
+      // 順方向に n 回進めるか、逆方向に (位数 - n) 回進めるか、少ない側を選ぶ
+      const dir = r.n <= r.order - r.n ? 1 : -1;
+      const ab = abilityAt(r.i);
+      if (!applyMoveState(r.i, dir)) break;
+      last = { i: r.i, dir, ab };
+    }
+  });
+  if (last) {
+    flashSlot(last.i, last.dir);
+    Sfx.move(last.ab, last.dir);      // 音は 1 回ぶんだけ
+  }
+  if (isSolved()) { showClear(); return; }
+  autoTimer = setTimeout(stepAuto, interval);
+}
+
+// 完成形へ直接動かす。タイルが元の位置に戻る配置は必ず目標の柄になる。
+function snapToGoal() {
+  animatePlacement(() => { board = Array.from({ length: SIZE }, (_, i) => i); });
+  showClear();
+}
+
+function stopAutoSolve() {
+  autoSolving = false;
+  autoStep = null;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  autoBarEl.hidden = true;
+}
+
+// 新しい盤面が出るときの入り。transform を使うが、手を打てば
+// applyAnimated が既存のアニメーションを打ち切るので FLIP とは衝突しない。
+function dealIn() {
+  const still = typeof matchMedia !== 'undefined'
+    && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (still) return;
+  for (let i = 0; i < SIZE; i++) {
+    tiles[board[i]].animate(
+      [{ opacity: 0, transform: 'scale(.86)' }, { opacity: 1, transform: 'none' }],
+      { duration: 300, delay: (xOf(i) + yOf(i)) * 20, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'backwards' }
+    );
+  }
+}
+
+// ---- 混ぜ方 ----
+// 盤面ごとに (能力, マス) の手を先に引いておく。混ぜるときに何度も使う。
+function buildMoveTable() {
+  const cyc = [];
+  const cnt = [];
+  for (let a = 0; a < ABILITIES.length; a++) {
+    const per = Array.from({ length: SIZE }, (_, i) => cyclesOf(a, xOf(i), yOf(i)));
+    cyc.push(per);
+    // 位数 2 の手は順逆が同じ結果になるので 1 通りと数える
+    cnt.push(per.map((c) => (c ? (orderOf(c) === 2 ? 1 : 2) : 0)));
+  }
+  return { cyc, cnt };
+}
+
+// その盤面で打てる手の総数（向きこみ）
+function degreeOf(b, tbl) {
+  let d = 0;
+  for (let i = 0; i < SIZE; i++) d += tbl.cnt[tileAbility[b[i]]][i];
+  return d;
+}
+
+// 打てる手を通し番号で取り出す
+function nthMove(b, tbl, d) {
+  for (let i = 0; i < SIZE; i++) {
+    const c = tbl.cnt[tileAbility[b[i]]][i];
+    if (d < c) return [i, c === 1 || d === 0 ? 1 : -1];
+    d -= c;
+  }
+  return null;
+}
+
+// 完成状態から混ぜる。
+//
+// 「打てる手から等確率で 1 つ」だけだと、打てる手が多い盤面ほど居座りやすくなり、
+// いくら混ぜても一様分布にならない（厳密に計算すると全変動距離 0.06〜0.07 の偏りが残る）。
+// そこで Metropolis 補正を入れる。次数の比で採択すれば詳細釣り合いが成り立ち、
+// 定常分布はちょうど一様＝エントロピー最大になる。
+function mixBoard(b, tbl, steps, rng, rec) {
+  let deg = degreeOf(b, tbl);
+  for (let t = 0; t < steps; t++) {
+    const [i, dir] = nthMove(b, tbl, Math.floor(rng() * deg));
+    const cyc = tbl.cyc[tileAbility[b[i]]][i];
+    applyTo(b, cyc, dir);
+    const next = degreeOf(b, tbl);
+    if (rng() < Math.min(1, deg / next)) { deg = next; rec.push([i, dir]); }
+    else applyTo(b, cyc, -dir);   // 棄却したので戻す
+  }
+}
+
+// 1 手ずつの並びを「このマスを n 回押す」という形にまとめる。
+// 位数はその時点の盤面で決まるので、順に進めながら求める。
+function movesToRuns(mvs, startBoard, tbl) {
+  const b = Uint8Array.from(startBoard);
+  const runs = [];
+  for (const [i, dir] of mvs) {
+    const cyc = tbl.cyc[tileAbility[b[i]]][i];
+    const order = orderOf(cyc);
+    const last = runs[runs.length - 1];
+    if (last && last.i === i) {
+      last.n = (((last.n + (dir > 0 ? 1 : order - 1)) % order) + order) % order;
+      if (last.n === 0) runs.pop();
+    } else {
+      runs.push({ i, n: dir > 0 ? 1 : order - 1, order });
+    }
+    applyTo(b, cyc, dir);
+  }
+  return runs;
+}
+
+// 混ぜた道筋から、同じ盤面に戻った区間を取り除く。
+// 混ぜた手数そのままだと保険の手順が長すぎるため。
+// 切り詰めたときは捨てた区間の記録も消す。残すと、あとでその盤面に戻ったときに
+// 配列を穴あきのまま伸ばしてしまう。
+function removeLoops(path, tbl) {
+  const lay = Uint8Array.from({ length: SIZE }, (_, i) => tileAbility[i]);
+  const layKey = () => String.fromCharCode.apply(null, lay);
+  const keyAt = [layKey()];
+  const seen = new Map([[keyAt[0], 0]]);
+  const out = [];
+  for (const mv of path) {
+    applyTo(lay, tbl.cyc[lay[mv[0]]][mv[0]], mv[1]);
+    out.push(mv);
+    const k = layKey();
+    const prev = seen.get(k);
+    if (prev !== undefined) {
+      for (let j = prev + 1; j < out.length; j++) seen.delete(keyAt[j]);
+      out.length = prev;
+      keyAt.length = prev + 1;
+    } else {
+      seen.set(k, out.length);
+      keyAt[out.length] = k;
+    }
+  }
+  return out;
+}
+
+// ---- 生成 ----
+function newPuzzle(useSeed) {
+  seed = Number.isFinite(useSeed) ? useSeed : Math.floor(Math.random() * 1e9);
+  const rng = mulberry32(seed);
+  const K = Math.min(types, SIZE, ABILITIES.length);
+  let steps = scrambleSteps();
+
+  const cands = candidatePatterns(N, K);
+
+  for (let attempt = 0; ; attempt++) {
+    const pat = cands[Math.floor(rng() * cands.length)];
+
+    // 使うブロックを K 種類選ぶ
+    const pool = ABILITIES.map((_, k) => k);
+    for (let k = pool.length - 1; k > 0; k--) {
+      const j = Math.floor(rng() * (k + 1));
+      [pool[k], pool[j]] = [pool[j], pool[k]];
+    }
+    const picked = pool.slice(0, K);
+
+    // 柄を目標配置にする。タイル v の能力 = 完成時にマス v に来る色。
+    tileAbility = Array.from({ length: SIZE }, (_, i) => picked[pat.fn(xOf(i), yOf(i), N, K)]);
+
+    // 完成状態から混ぜる → 必ず解ける。Metropolis 補正なので定常分布は一様。
+    const tbl = buildMoveTable();
+    board = Array.from({ length: SIZE }, (_, i) => i);
+    const path = [];
+    mixBoard(board, tbl, steps, rng, path);
+
+    // 混ぜた結果がたまたま完成形なら引き直す
+    // （到達できる状態が極端に少ない組み合わせでは起こりうる）
+    if (!isSolved()) {
+      // 保険の手順は、混ぜた道筋を逆にたどったもの
+      const trimmed = removeLoops(path, tbl);
+      const back = [];
+      for (let k = trimmed.length - 1; k >= 0; k--) back.push([trimmed[k][0], -trimmed[k][1]]);
+      solution = movesToRuns(back, board, tbl);
+      break;
+    }
+    if (attempt > 40) steps += SIZE; // まず起きないが、念のため深くして抜ける
+  }
+
+  stopAutoSolve();
+  autoSolvedFlag = false;
+  confirmEl.hidden = true;
+  gridEl.classList.remove('cleared');
+  logEl.classList.remove('done');
+  moves = 0;
+  run = { i: -1, d: 0, order: 1 };
+  hintPlan = null;
+  locked = false;
+
+  // 解法の準備。計算中の Worker は捨てて作り直す（古い盤面の計算を待たないため）
+  problem = buildProblem();
+  solveId++;
+  hintBusy = false;
+  solveDones = [];
+  movesWhileSolving = [];
+  makeWorker();
+  if (worker) worker.postMessage({ type: 'init', problem });
+
+  paintTiles();
+  renderGoal();
+  renderLegend();
+  renderPanel();
+  placeTiles();
+  markUsable();
+  clearHint();
+  dealIn();
+  seedOutEl.textContent = String(seed);
+  document.getElementById('seedIn').value = String(seed);
+  logEl.textContent = 'タイルをクリック';
+
+  // 先に裏で解いておく。ヒントを押したときに待たせないため。
+  requestSolve(null, false, true);
+}
+
+
+// ---- 配線 ----
+// 押す = 順方向、長押し（または右クリック）= 逆方向。
+// 位数 2 の入れ替えは順逆が同じ結果になるので、実質は回転のブロック向け。
+//
+// 注意: タッチ端末では、自前の長押しタイマーとは別にブラウザ自身も長押しで
+// contextmenu を出す。どちらが先に来ても 1 回しか発動しないよう、
+// 「この押下ではもう発動した」という印を 1 つだけ持って両方で見る。
+const LONG_PRESS_MS = 400;
+let pressCell = -1;
+let pressTimer = null;
+let pressHandled = true;
+
+function endPress() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+}
+
+// この押下でまだ発動していなければ 1 回だけ発動する
+function firePress(i, dir) {
+  if (pressHandled || i < 0) return;
+  pressHandled = true;
+  endPress();
+  fire(i, dir);
+}
+
+gridEl.addEventListener('pointerdown', (e) => {
+  if (autoSolving) return;
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  endPress();
+  pressCell = Number(slot.dataset.i);
+  pressHandled = false;              // ここから 1 回だけ発動できる
+  if (e.button !== 0) return;        // 右クリックは contextmenu 側で扱う
+  pressTimer = setTimeout(() => {
+    pressTimer = null;
+    firePress(pressCell, -1);        // 長押し = 逆方向
+  }, LONG_PRESS_MS);
+});
+
+gridEl.addEventListener('pointerup', () => {
+  if (autoSolving) return;
+  endPress();
+  firePress(pressCell, 1);           // 短く離した = 順方向
+});
+
+// 指やカーソルが外れたら、この押下では何も発動させない
+const abortPress = () => { endPress(); pressHandled = true; };
+gridEl.addEventListener('pointercancel', abortPress);
+gridEl.addEventListener('pointerleave', abortPress);
+
+gridEl.addEventListener('contextmenu', (e) => {
+  const slot = e.target.closest('.slot');
+  if (!slot) return;
+  e.preventDefault();                // 長押しのメニューは常に抑止する
+  if (autoSolving) return;
+  // 右クリックでも長押しでも、contextmenu の前に必ず pointerdown が来る。
+  // ここで押下の有無に関わらず発動できるようにすると、
+  // 「押したまま外へ出たら発動しない」という保証が壊れるので、印に従うだけにする。
+  firePress(pressCell, -1);
+});
+
+document.getElementById('hintBtn').addEventListener('click', showHint);
+
+const soundBtn = document.getElementById('soundBtn');
+function markSound() {
+  soundBtn.setAttribute('aria-pressed', String(Sfx.enabled));
+  soundBtn.setAttribute('aria-label', Sfx.enabled ? '効果音を切る' : '効果音を入れる');
+}
+soundBtn.addEventListener('click', () => { Sfx.set(!Sfx.enabled); markSound(); });
+markSound();
+document.getElementById('solveBtn').addEventListener('click', askAutoSolve);
+document.getElementById('confirmYes').addEventListener('click', startAutoSolve);
+document.getElementById('confirmNo').addEventListener('click', () => { confirmEl.hidden = true; });
+document.getElementById('autoStop').addEventListener('click', stopAutoSolve);
+
+// ---- パネルの開閉 ----
+// 設定パネルとブロック説明パネルを同じ仕組みで扱う。片方を開くともう片方は閉じる。
+const backdropEl = document.getElementById('panelBackdrop');
+
+const PANELS = {
+  setup: {
+    el: document.getElementById('setup'),
+    btn: document.getElementById('setupBtn'),
+    close: document.getElementById('setupClose'),
+    label: '盤面の設定',
+    onOpen: syncSetup,
+  },
+  panel: {
+    el: document.getElementById('panel'),
+    btn: document.getElementById('menuBtn'),
+    close: document.getElementById('panelClose'),
+    label: 'ブロックの説明',
+  },
+};
+
+const isOpen = (key) => PANELS[key].el.classList.contains('open');
+
+function setPanel(key, open) {
+  for (const [k, p] of Object.entries(PANELS)) {
+    const on = open && k === key;
+    p.el.classList.toggle('open', on);
+    p.el.setAttribute('aria-hidden', String(!on));
+    p.btn.setAttribute('aria-expanded', String(on));
+    p.btn.setAttribute('aria-label', `${p.label}を${on ? '閉じる' : '開く'}`);
+  }
+  backdropEl.hidden = !open;
+  document.body.classList.toggle('no-scroll', open); // 背景のスクロールを止める
+  if (open) {
+    PANELS[key].onOpen?.();
+    PANELS[key].close.focus();
+  } else {
+    PANELS[key].btn.focus();
+  }
+}
+
+for (const [key, p] of Object.entries(PANELS)) {
+  p.btn.addEventListener('click', () => setPanel(key, !isOpen(key)));
+  p.close.addEventListener('click', () => setPanel(key, false));
+}
+backdropEl.addEventListener('click', () => {
+  for (const key of Object.keys(PANELS)) if (isOpen(key)) setPanel(key, false);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!confirmEl.hidden) { confirmEl.hidden = true; return; }
+  if (autoSolving) { stopAutoSolve(); return; }
+  for (const key of Object.keys(PANELS)) if (isOpen(key)) setPanel(key, false);
+});
+
+// ---- 盤面の設定 ----
+// 選んだ内容はいったん保留し、「作成」を押したときだけ盤面に反映する。
+let pendN = N;
+let pendTypes = types;
+
+const seedInEl = document.getElementById('seedIn');
+
+const sizeSegEl = document.getElementById('sizeSeg');
+const typeSegEl = document.getElementById('typeSeg');
+const typeNoteEl = document.getElementById('typeNote');
+
+function markSeg(el, value) {
+  for (const b of el.querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.v) === value));
+  }
+}
+
+function fillSeg(el, values, label) {
+  el.replaceChildren();
+  for (const v of values) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.v = String(v);
+    b.textContent = label(v);
+    b.setAttribute('aria-pressed', 'false');
+    el.append(b);
+  }
+}
+
+// 選んだサイズで作れないブロック数は押せなくする
+function refreshTypeSeg() {
+  let unavailable = 0;
+  for (const b of typeSegEl.querySelectorAll('button')) {
+    const k = Number(b.dataset.v);
+    const okK = typeAvailable(pendN, k);
+    b.disabled = !okK;
+    if (!okK) unavailable++;
+  }
+  // 選択中の数が使えなくなったら、使える範囲でいちばん近い数に寄せる
+  if (!typeAvailable(pendN, pendTypes)) {
+    const usable = TYPE_COUNTS.filter((k) => typeAvailable(pendN, k));
+    pendTypes = usable.reduce((best, k) =>
+      Math.abs(k - pendTypes) < Math.abs(best - pendTypes) ? k : best, usable[0]);
+  }
+  markSeg(typeSegEl, pendTypes);
+  typeNoteEl.textContent = unavailable
+    ? `${pendN}×${pendN} では、この色数で作れる柄がないものを伏せています。`
+    : '';
+}
+
+// パネルを開くたびに、今の盤面の設定に合わせ直す
+function syncSetup() {
+  pendN = N;
+  pendTypes = types;
+  markSeg(sizeSegEl, pendN);
+  refreshTypeSeg();
+  seedInEl.value = '';
+}
+
+fillSeg(sizeSegEl, SIZES, (v) => `${v}×${v}`);
+fillSeg(typeSegEl, TYPE_COUNTS, (v) => `${v} 種`);
+
+sizeSegEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled) return;
+  pendN = Number(b.dataset.v);
+  markSeg(sizeSegEl, pendN);
+  refreshTypeSeg();
+});
+typeSegEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.disabled) return;
+  pendTypes = Number(b.dataset.v);
+  markSeg(typeSegEl, pendTypes);
+});
+
+document.getElementById('createBtn').addEventListener('click', () => {
+  if (pendN !== N) {
+    N = pendN;
+    SIZE = N * N;
+    buildDom();
+  }
+  types = pendTypes;
+  const v = parseInt(seedInEl.value, 10);
+  newPuzzle(Number.isFinite(v) ? v : undefined);
+  setPanel('setup', false);
+});
+
+buildDom();
+newPuzzle();
