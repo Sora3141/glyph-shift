@@ -39,38 +39,38 @@ function mulberry32(seed) {
 //        1 マスでも盤の外に出るか、自分のマスを含む場合は「使えない」と判定される。
 const ABILITIES = [
   { id: 'swapLR', color: 'hsl(352 38% 74%)', name: '左右の隣どうしを入れ替え',
-    cells: (x, y) => [[[x - 1, y], [x + 1, y]]], motion: 'link-h' },
+    cells: (x, y) => [[[x - 1, y], [x + 1, y]]] },
 
   { id: 'swapUD', color: 'hsl(22 64% 50%)', name: '上下の隣どうしを入れ替え',
-    cells: (x, y) => [[[x, y - 1], [x, y + 1]]], motion: 'link-v' },
+    cells: (x, y) => [[[x, y - 1], [x, y + 1]]] },
 
   { id: 'swapD1', color: 'hsl(42 38% 51%)', name: '左上と右下を入れ替え',
-    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]]], motion: 'link-d1' },
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]]] },
 
   { id: 'swapD2', color: 'hsl(62 56% 50%)', name: '右上と左下を入れ替え',
-    cells: (x, y) => [[[x + 1, y - 1], [x - 1, y + 1]]], motion: 'link-d2' },
+    cells: (x, y) => [[[x + 1, y - 1], [x - 1, y + 1]]] },
 
   { id: 'crossCW', color: 'hsl(92 59% 76%)', name: '上下左右の 4 マスを時計回り',
-    cells: (x, y) => [[[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]]], motion: 'cw' },
+    cells: (x, y) => [[[x, y - 1], [x + 1, y], [x, y + 1], [x - 1, y]]] },
 
   { id: 'diagCW', color: 'hsl(135 54% 50%)', name: '斜め 4 マスを時計回り',
-    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y - 1], [x + 1, y + 1], [x - 1, y + 1]]], motion: 'cw' },
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y - 1], [x + 1, y + 1], [x - 1, y + 1]]] },
 
   { id: 'ringCW', color: 'hsl(168 68% 50%)', name: '周囲 8 マスを時計回り',
     cells: (x, y) => [[[x - 1, y - 1], [x, y - 1], [x + 1, y - 1], [x + 1, y],
-                       [x + 1, y + 1], [x, y + 1], [x - 1, y + 1], [x - 1, y]]], motion: 'cw' },
+                       [x + 1, y + 1], [x, y + 1], [x - 1, y + 1], [x - 1, y]]] },
 
   // 以下は回転の半分ぶん。向かい合うマスどうしが同時に入れ替わる。
   // それぞれ crossCW を 2 回、diagCW を 2 回、ringCW を 4 回使ったのと同じ動き。
   { id: 'crossHalf', color: 'hsl(192 46% 73%)', name: '上下と左右を同時に入れ替え',
-    cells: (x, y) => [[[x, y - 1], [x, y + 1]], [[x + 1, y], [x - 1, y]]], motion: 'half-cross' },
+    cells: (x, y) => [[[x, y - 1], [x, y + 1]], [[x + 1, y], [x - 1, y]]] },
 
   { id: 'diagHalf', color: 'hsl(215 43% 55%)', name: '斜めの対角どうしを同時に入れ替え',
-    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x + 1, y - 1], [x - 1, y + 1]]], motion: 'half-diag' },
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x + 1, y - 1], [x - 1, y + 1]]] },
 
   { id: 'ringHalf', color: 'hsl(315 40% 57%)', name: '周囲 8 マスを向かいどうしで入れ替え',
     cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x, y - 1], [x, y + 1]],
-                      [[x + 1, y - 1], [x - 1, y + 1]], [[x + 1, y], [x - 1, y]]], motion: 'half-ring' },
+                      [[x + 1, y - 1], [x - 1, y + 1]], [[x + 1, y], [x - 1, y]]] },
 
 ];
 
@@ -112,58 +112,18 @@ function cyclesOf(abIndex, x, y) {
 }
 
 // ---- アイコン描画 ----
-// 点は 3×3 の模式図。輪が自分（動かない）、濃い点が効果を受けるマス。
-// 回転の弧は点の外側を通し、行／列の端を指す印は外周に置いて、点と重ならないようにする。
-const P = (d) => 12 + d * 6; // -1, 0, 1 → 6, 12, 18
+// 描き方そのものは glyphs.js が持つ。ここは「今どれを使うか」だけを覚える。
+const Glyphs = glyphStyles();
+const GLYPH_KEY = 'glyphshift.glyph';
 
-const ICON_DOTS = {
-  swapLR: [[-1, 0], [1, 0]],
-  swapUD: [[0, -1], [0, 1]],
-  swapD1: [[-1, -1], [1, 1]],
-  swapD2: [[1, -1], [-1, 1]],
-  crossCW: [[0, -1], [1, 0], [0, 1], [-1, 0]],
-  diagCW: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
-  ringCW: [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]],
-  crossHalf: [[0, -1], [1, 0], [0, 1], [-1, 0]],
-  diagHalf: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
-  ringHalf: [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]],
-};
+let glyphStyle = Glyphs.DEFAULT;
+try {
+  const saved = typeof localStorage !== 'undefined' ? localStorage.getItem(GLYPH_KEY) : null;
+  if (saved && Glyphs.has(saved)) glyphStyle = saved;
+} catch (e) { /* localStorage が使えない環境では既定のまま */ }
 
-const MOTION = {
-  // 入れ替え: 2 点を結ぶ線。中央の輪を避けて膨らませる
-  'link-h': '<path d="M6 12 Q12 5 18 12" stroke-width="1.3" opacity=".7"/>',
-  'link-v': '<path d="M12 6 Q19 12 12 18" stroke-width="1.3" opacity=".7"/>',
-  'link-d1': '<path d="M6 6 Q19 5 18 18" stroke-width="1.3" opacity=".7"/>',
-  'link-d2': '<path d="M18 6 Q5 5 6 18" stroke-width="1.3" opacity=".7"/>',
-  // 回転: 点より外側を回る 3/4 円 + 進行方向の矢じり（時計回りのみ）
-  'cw': '<path d="M12 2 A10 10 0 1 1 2 12" stroke-width="1.3" opacity=".8"/>'
-      + '<polygon points="2,7.8 0.1,12.2 3.9,12.2" fill="currentColor" stroke="none"/>',
-  // 半回転: 向かい合う 2 点を中心ごしに結ぶ。中心の輪の手前で切って、
-  // 「自分を挟んで反対どうしが入れ替わる」ことを線の向きで示す。
-  // 入れ替えの弧（1 本）と見分けがつくよう、こちらは直線で描く。
-  'half-cross': '<path d="M12 6.6 V8.6 M12 15.4 V17.4 M6.6 12 H8.6 M15.4 12 H17.4"'
-              + ' stroke-width="1.5" opacity=".8"/>',
-  'half-diag': '<path d="M7.6 7.6 L9.9 9.9 M14.1 14.1 L16.4 16.4'
-             + ' M16.4 7.6 L14.1 9.9 M9.9 14.1 L7.6 16.4" stroke-width="1.5" opacity=".8"/>',
-  'half-ring': '<path d="M12 6.6 V8.6 M12 15.4 V17.4 M6.6 12 H8.6 M15.4 12 H17.4'
-             + ' M7.6 7.6 L9.9 9.9 M14.1 14.1 L16.4 16.4'
-             + ' M16.4 7.6 L14.1 9.9 M9.9 14.1 L7.6 16.4" stroke-width="1.5" opacity=".8"/>',
-};
-
-function iconSvg(abIndex) {
-  const ab = ABILITIES[abIndex];
-  const parts = [];
-  for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
-    if (dx === 0 && dy === 0) continue;
-    parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.1" fill="currentColor" stroke="none" opacity=".2"/>`);
-  }
-  parts.push(MOTION[ab.motion]); // 弧や矢印は点の下に敷く
-  for (const [dx, dy] of ICON_DOTS[ab.id]) {
-    parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="2.2" fill="currentColor" stroke="none"/>`);
-  }
-  parts.push('<circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"/>');
-  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">${parts.join('')}</svg>`;
-}
+// 能力そのものから描く。cells(0, 0) が「中身をどう送るか」を relative に返す。
+const iconSvg = (abIndex) => Glyphs.draw(glyphStyle, ABILITIES[abIndex].cells(0, 0), bgOf(abIndex));
 
 // 色は能力に固定せず、盤面ごとに割り当てる。
 // 能力が 10 種あるので固定の色相だと近い色が同居しうるが、柄合わせでは
@@ -1231,13 +1191,139 @@ gridEl.addEventListener('contextmenu', (e) => {
 
 document.getElementById('hintBtn').addEventListener('click', showHint);
 
+// ---- パネルのタブ ----
+// ブロックの一覧が長いので、ルール・ブロック・設定は積まずに切り替える。
+const panelTabsEl = document.getElementById('panelTabs');
+const TABS = [
+  { key: 'rule', label: 'ルール', sec: 'secRule' },
+  { key: 'block', label: 'ブロック', sec: 'secBlock' },
+  { key: 'config', label: '設定', sec: 'secConfig' },
+];
+let panelTab = TABS[0].key;
+
+for (const t of TABS) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.id = `tab${t.key[0].toUpperCase()}${t.key.slice(1)}`;
+  b.dataset.v = t.key;
+  b.setAttribute('role', 'tab');
+  b.setAttribute('aria-controls', t.sec);
+  b.textContent = t.label;
+  panelTabsEl.append(b);
+}
+
+function setPanelTab(key, focus = false) {
+  if (!TABS.some((t) => t.key === key)) return;
+  panelTab = key;
+  for (const b of panelTabsEl.querySelectorAll('button')) {
+    const on = b.dataset.v === key;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    if (on && focus) b.focus();
+  }
+  for (const t of TABS) document.getElementById(t.sec).hidden = t.key !== key;
+  document.getElementById('panel').scrollTop = 0;   // 前のタブの読みかけ位置を持ち越さない
+}
+
+setPanelTab(panelTab);
+
+panelTabsEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) setPanelTab(b.dataset.v);
+});
+// タブは左右キーで移れるのが決まりごと
+panelTabsEl.addEventListener('keydown', (e) => {
+  const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (!step) return;
+  e.preventDefault();
+  const at = TABS.findIndex((t) => t.key === panelTab);
+  setPanelTab(TABS[(at + step + TABS.length) % TABS.length].key, true);
+});
+
+// ---- 絵柄の選び ----
+// 盤のサイズやブロック数と違い、これは見た目だけの設定なので
+// 「作成」を待たずにその場で切り替える。選んだものは次回も覚えている。
+const glyphSegEl = document.getElementById('glyphSeg');
+// 見本には回転を使う。描き方ごとの差がいちばん大きく出る。
+const GLYPH_SAMPLE = ABILITIES.findIndex((ab) => ab.id === 'crossCW');
+
+function fillGlyphSeg() {
+  glyphSegEl.replaceChildren();
+  for (const st of Glyphs.STYLES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.v = st.id;
+    b.title = st.note;
+    const box = document.createElement('span');
+    box.className = 'sample';
+    box.style.background = bgOf(GLYPH_SAMPLE);
+    box.style.color = INK;
+    box.innerHTML = Glyphs.draw(st.id, ABILITIES[GLYPH_SAMPLE].cells(0, 0), bgOf(GLYPH_SAMPLE));
+    const name = document.createElement('span');
+    name.textContent = st.name;
+    b.append(box, name);
+    glyphSegEl.append(b);
+  }
+}
+
+// 「絵柄の読み方」は描き方ごとに変わる。選んでいるものの説明に差し替える。
+function renderGlyphLegend() {
+  const ul = document.getElementById('glyphLegend');
+  ul.replaceChildren();
+  for (const line of Glyphs.byId(glyphStyle).legend) {
+    const li = document.createElement('li');
+    li.innerHTML = line;
+    ul.append(li);
+  }
+}
+
+function markGlyphSeg() {
+  for (const b of glyphSegEl.querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.v === glyphStyle));
+  }
+}
+
+// 絵柄が出てくるところを全部描き直す。盤面そのものは触らない。
+function setGlyphStyle(id) {
+  if (!Glyphs.has(id) || id === glyphStyle) return;
+  glyphStyle = id;
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem(GLYPH_KEY, id); }
+  catch (e) { /* 覚えられない環境でも、その場では切り替わる */ }
+  paintTiles();
+  renderGoal();
+  renderLegend();
+  renderPanel();
+  fillPicker();
+  refreshPicker();
+  renderGlyphLegend();
+  markGlyphSeg();
+}
+
+glyphSegEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) setGlyphStyle(b.dataset.v);
+});
+
+fillGlyphSeg();
+markGlyphSeg();
+renderGlyphLegend();
+
+// ---- 効果音 ----
+// 説明パネルの設定と、上のバーのボタンは同じ状態を指す。
 const soundBtn = document.getElementById('soundBtn');
+const soundChk = document.getElementById('soundChk');
+
 function markSound() {
   soundBtn.setAttribute('aria-pressed', String(Sfx.enabled));
   soundBtn.setAttribute('aria-label', Sfx.enabled ? '効果音を切る' : '効果音を入れる');
+  soundChk.checked = Sfx.enabled;
 }
-soundBtn.addEventListener('click', () => { Sfx.set(!Sfx.enabled); markSound(); });
+const setSound = (on) => { Sfx.set(on); markSound(); };
+soundBtn.addEventListener('click', () => setSound(!Sfx.enabled));
+soundChk.addEventListener('change', () => setSound(soundChk.checked));
 markSound();
+
+
 document.getElementById('solveBtn').addEventListener('click', askAutoSolve);
 document.getElementById('newBtn').addEventListener('click', askRegenerate);
 confirmYesEl.addEventListener('click', () => { const a = confirmAction; if (a) a(); });
@@ -1260,7 +1346,7 @@ const PANELS = {
     el: document.getElementById('panel'),
     btn: document.getElementById('menuBtn'),
     close: document.getElementById('panelClose'),
-    label: 'ブロックの説明',
+    label: '遊び方と設定',
   },
 };
 

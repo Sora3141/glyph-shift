@@ -2,3 +2,6 @@
 .backup/
 
 .DS_Store
+
+# 絵柄の比較ページ（Artifact に出すための作業用。ゲーム本体ではない）
+.glyph-proposals/

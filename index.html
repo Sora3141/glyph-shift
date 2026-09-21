@@ -44,7 +44,7 @@
           <circle cx="13" cy="17" r="2" fill="currentColor" stroke="none"/>
         </svg>
       </button>
-      <button id="menuBtn" class="icon menu-btn" type="button" aria-expanded="false" aria-controls="panel" aria-label="遊び方とブロックを開く" title="遊び方とブロック">
+      <button id="menuBtn" class="icon menu-btn" type="button" aria-expanded="false" aria-controls="panel" aria-label="遊び方と設定を開く" title="遊び方と設定">
         <span></span><span></span><span></span>
       </button>
     </div>
@@ -94,33 +94,47 @@
     <button id="createBtn" class="primary wide" type="button">この設定で作成</button>
   </aside>
 
-  <aside class="panel" id="panel" aria-hidden="true" aria-label="遊び方とブロック">
+  <aside class="panel" id="panel" aria-hidden="true" aria-label="遊び方と設定">
     <div class="panel-head">
-      <h2>遊び方とブロック</h2>
+      <h2>遊び方と設定</h2>
       <button id="panelClose" class="panel-close" type="button" aria-label="閉じる">&times;</button>
     </div>
 
-    <ol class="howto">
-      <li>絵柄がそのタイルの<strong>能力</strong>。押すと発動し、能力はタイルに付いて一緒に動く。</li>
-      <li>使ったタイル自身は動かない。動くのはまわりのマス。</li>
-      <li>回転は<strong>長押し</strong>（右クリックでも可）で<strong>逆回り</strong>。</li>
-      <li>盤の端はつながっていない。効果が盤の外に出る位置では<strong>使えない</strong>。</li>
-      <li><strong>目標の柄</strong>と同じ並びにすればクリア。同じ絵柄どうしは入れ替え可能。</li>
-    </ol>
+    <div class="panel-tabs" id="panelTabs" role="tablist" aria-label="表示を切り替える"></div>
 
-    <details class="howto-more">
-      <summary>アイコンの読み方</summary>
-      <ul>
-        <li>薄い点＝周囲のマス、輪＝<strong>自分</strong>（動かない）。</li>
-        <li>濃い点＝効果を受けるマス。</li>
-        <li>線で結ばれた 2 点は<strong>入れ替え</strong>。</li>
-        <li>矢印つきの弧は、その順に<strong>1 つ回す</strong>。</li>
-        <li>線が 2 本重なっているものは、<strong>向かい合う 2 組が同時に入れ替わる</strong>（回転の半分ぶん）。</li>
-      </ul>
-    </details>
+    <section class="panel-sec" id="secRule" role="tabpanel" aria-labelledby="tabRule" tabindex="0">
+      <ol class="howto">
+        <li>絵柄がそのタイルの<strong>能力</strong>。押すと発動し、能力はタイルに付いて一緒に動く。</li>
+        <li>使ったタイル自身は動かない。動くのはまわりのマス。</li>
+        <li>回転は<strong>長押し</strong>（右クリックでも可）で<strong>逆回り</strong>。</li>
+        <li>盤の端はつながっていない。効果が盤の外に出る位置では<strong>使えない</strong>。</li>
+        <li><strong>目標の柄</strong>と同じ並びにすればクリア。同じ絵柄どうしは入れ替え可能。</li>
+      </ol>
+      <p class="howto-note">手数は差し引きで数える。回転を 3 回押して元に戻れば 0 手、
+        逆回りに 1 つぶんなら 1 手。</p>
+    </section>
 
-    <p class="label panel-sub">ブロック 全 10 種</p>
-    <div class="panel-body" id="panelBody"></div>
+    <section class="panel-sec" id="secBlock" role="tabpanel" aria-labelledby="tabBlock" tabindex="0" hidden>
+      <details class="howto-more">
+        <summary>絵柄の読み方</summary>
+        <ul id="glyphLegend"></ul>
+      </details>
+      <p class="label panel-sub">全 10 種</p>
+      <div class="panel-body" id="panelBody"></div>
+    </section>
+
+    <section class="panel-sec" id="secConfig" role="tabpanel" aria-labelledby="tabConfig" tabindex="0" hidden>
+      <div class="field">
+        <span class="label">絵柄</span>
+        <div class="glyph-seg" id="glyphSeg" role="group" aria-label="絵柄の描き方"></div>
+        <p class="note">同じブロックを別の描き方で表します。選ぶとすぐ切り替わり、盤面はそのままです。</p>
+      </div>
+      <label class="switch sound-switch">
+        <input type="checkbox" id="soundChk" checked>
+        <span>効果音</span>
+        <span class="switch-note">押したとき・揃ったとき・完成したときに短い音が鳴る</span>
+      </label>
+    </section>
   </aside>
 
   <main class="stage">
@@ -190,6 +204,7 @@
 
   <script src="sound.js"></script>
   <script src="patterns.js"></script>
+  <script src="glyphs.js"></script>
   <script src="solver.js"></script>
   <script src="script.js"></script>
 </body>

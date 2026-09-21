@@ -34,7 +34,7 @@ const ctx = {
 };
 ctx.window = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
-for (const f of ['sound.js', 'script.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
+for (const f of ['sound.js', 'glyphs.js', 'script.js']) vm.runInContext(fs.readFileSync(path.join(root, f), 'utf8'), ctx, { filename: f });
 
 vm.runInContext(`
   globalThis.__setup = (w, h, k) => { W = w; H = h; SIZE = w * h; types = k; buildDom(); };
