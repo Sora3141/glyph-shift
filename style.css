@@ -114,10 +114,6 @@ body {
 .menu-btn[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
 .menu-btn[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6.8px) rotate(-45deg); }
 
-#soundBtn .mute { display: none; }
-#soundBtn[aria-pressed="false"] .wave { display: none; }
-#soundBtn[aria-pressed="false"] .mute { display: inline; }
-
 /* ---- 盤面 ---- */
 .stage {
   display: flex;

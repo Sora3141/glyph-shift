@@ -1309,18 +1309,11 @@ markGlyphSeg();
 renderGlyphLegend();
 
 // ---- 効果音 ----
-// 説明パネルの設定と、上のバーのボタンは同じ状態を指す。
-const soundBtn = document.getElementById('soundBtn');
+// 入切は説明パネルの設定にある。
 const soundChk = document.getElementById('soundChk');
 
-function markSound() {
-  soundBtn.setAttribute('aria-pressed', String(Sfx.enabled));
-  soundBtn.setAttribute('aria-label', Sfx.enabled ? '効果音を切る' : '効果音を入れる');
-  soundChk.checked = Sfx.enabled;
-}
-const setSound = (on) => { Sfx.set(on); markSound(); };
-soundBtn.addEventListener('click', () => setSound(!Sfx.enabled));
-soundChk.addEventListener('change', () => setSound(soundChk.checked));
+function markSound() { soundChk.checked = Sfx.enabled; }
+soundChk.addEventListener('change', () => { Sfx.set(soundChk.checked); markSound(); });
 markSound();
 
 
