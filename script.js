@@ -213,6 +213,27 @@ const PATTERNS = [
     fn: (x, y, n) => (y >= Math.floor(n / 2) ? 2 : 0) + (x >= Math.floor(n / 2) ? 1 : 0) },
 ];
 
+// ---- 図鑑の柄を取り込む ----
+// patterns.js（~/dev/tilezukan から持ち込んだもの）の 26 柄を足す。
+// 向こうは f(i, j, ...) で i が行・j が列、こちらは fn(x, y, ...) で x が列・y が行。
+// 取り込むときに入れ替える。
+//
+// 使えるかどうかは ok では判定しない。柄によって出せる色数の上限が違い
+// （枡繋ぎは輪が ⌈n/2⌉ 本しかない等）、実際に並べてみないと分からないため、
+// candidatePatterns の「k 色すべてが出るか」に任せる。
+let patternSeed = 0;   // 種つきの柄に渡す。盤面ごとに変える。
+
+if (typeof tilePatterns === 'function') {
+  for (const p of tilePatterns().PATTERNS) {
+    PATTERNS.push({
+      id: p.id,
+      ok: () => true,
+      label: () => p.name,
+      fn: (x, y, n, k) => p.f(y, x, n, k, patternSeed),
+    });
+  }
+}
+
 // 予備の並べ方。左上から順に色を送っていくだけで柄とは呼べないが、
 // マス数さえ足りれば必ず全色が出る。正規の柄が 1 つも作れないときだけ使う。
 const FALLBACK = {
@@ -997,6 +1018,7 @@ function newPuzzle(useSeed) {
   const K = Math.min(types, SIZE, ABILITIES.length);
   let steps = scrambleSteps();
 
+  patternSeed = Math.floor(rng() * 1e9);   // 種つきの柄を盤面ごとに変える
   const cands = candidatePatterns(N, K);
 
   for (let attempt = 0; ; attempt++) {
