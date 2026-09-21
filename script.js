@@ -1386,6 +1386,10 @@ document.addEventListener('keydown', (e) => {
 
 // ---- 盤面の設定 ----
 // 選んだ内容はいったん保留し、「作成」を押したときだけ盤面に反映する。
+// 辺は 2 つ選ぶだけ。長いほうを横にするので、盤が縦長になることはない。
+// 縦長だとスマホの画面に収まらないため。
+let pendA = W;
+let pendB = H;
 let pendW = W;
 let pendH = H;
 let pendTypes = types;
@@ -1398,8 +1402,9 @@ const typeSegEl = document.getElementById('typeSeg');
 const typeNoteEl = document.getElementById('typeNote');
 const createBtnEl = document.getElementById('createBtn');
 const customChk = document.getElementById('customChk');
-const wSegEl = document.getElementById('wSeg');
-const hSegEl = document.getElementById('hSeg');
+const sideAEl = document.getElementById('sideA');
+const sideBEl = document.getElementById('sideB');
+const sizeNoteEl = document.getElementById('sizeNote');
 const pickerEl = document.getElementById('blockPicker');
 const pickNoteEl = document.getElementById('pickNote');
 
@@ -1478,15 +1483,28 @@ function refreshCustom() {
   document.getElementById('customSize').hidden = !pendCustom;
   document.getElementById('customBlocks').hidden = !pendCustom;
   customChk.checked = pendCustom;
-  if (pendCustom) { markSeg(wSegEl, pendW); markSeg(hSegEl, pendH); refreshPicker(); }
+  if (pendCustom) { applySides(); refreshPicker(); }
   else { markSeg(sizeSegEl, pendW); refreshTypeSeg(); }
   createBtnEl.disabled = pendCustom && !customReady();
 }
 
 const customReady = () => pendPicked.size >= 2 && pendPicked.size <= Math.min(ABILITIES.length, pendW * pendH);
 
+// 選んだ 2 辺から盤の形を決める。長いほうが横。
+function applySides() {
+  pendW = Math.max(pendA, pendB);
+  pendH = Math.min(pendA, pendB);
+  markSeg(sideAEl, pendA);
+  markSeg(sideBEl, pendB);
+  sizeNoteEl.textContent = pendW === pendH
+    ? `${pendW}×${pendW} の正方形になります。`
+    : `長いほうが横になります。→ 横 ${pendW} × 縦 ${pendH}`;
+}
+
 // パネルを開くたびに、今の盤面の設定に合わせ直す
 function syncSetup() {
+  pendA = W;
+  pendB = H;
   pendW = W;
   pendH = H;
   pendTypes = types;
@@ -1498,14 +1516,14 @@ function syncSetup() {
 
 fillSeg(sizeSegEl, SIZES, (v) => `${v}×${v}`);
 fillSeg(typeSegEl, TYPE_COUNTS, (v) => `${v} 種`);
-fillSeg(wSegEl, SIZES, (v) => String(v));
-fillSeg(hSegEl, SIZES, (v) => String(v));
+fillSeg(sideAEl, SIZES, (v) => String(v));
+fillSeg(sideBEl, SIZES, (v) => String(v));
 fillPicker();
 
 sizeSegEl.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b || b.disabled) return;
-  pendW = pendH = Number(b.dataset.v);
+  pendA = pendB = pendW = pendH = Number(b.dataset.v);
   markSeg(sizeSegEl, pendW);
   refreshTypeSeg();
 });
@@ -1515,7 +1533,7 @@ typeSegEl.addEventListener('click', (e) => {
   pendTypes = Number(b.dataset.v);
   markSeg(typeSegEl, pendTypes);
 });
-for (const [el, set] of [[wSegEl, (v) => { pendW = v; }], [hSegEl, (v) => { pendH = v; }]]) {
+for (const [el, set] of [[sideAEl, (v) => { pendA = v; }], [sideBEl, (v) => { pendB = v; }]]) {
   el.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled) return;
