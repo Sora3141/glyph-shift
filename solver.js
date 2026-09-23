@@ -24,6 +24,9 @@
 //   2. 双方向 BFS       … 厳密に最短。状態数が上限に収まる盤面（4×4 と多くの 5×5）で成功する。
 //   3. 積み上げ         … 1 マスずつ確定していく人間流。確定マスを崩さない「きれいな手順」
 //                         （交換子・共役、その 2〜3 段目）を機械的に作って探す。大きい盤でも数百手に収まる。
+//                         2 手の共役・交換子は相対座標の部品ライブラリ（pairLibrary）から引く。
+//                         能力の効果は平行移動で不変なので、鍵 (能力A, 向きA, 能力B, 向きB, 相対位置)
+//                         で一度だけ作れば、盤面や窓ごとに作り直さなくてよい。
 //                         最後に残す 3×3 の穴は、柄から「崩さずに動かせる配置の数」を測って
 //                         いちばん豊かな位置を選び（pickHole）、そこへ向かって遠いマスから埋める。
 //                         走査順は hole → spiral → rows の順に試す。
@@ -387,7 +390,7 @@ function solverModule() {
       return { cell: p, q: pos[p], byA };
     });
     const extract = (lay) => { const S = new Uint8Array(region.length); for (let k = 0; k < region.length; k++) S[k] = lay[region[k]]; return S; };
-    return { region, pos, table, extract };
+    return { region, pos, table, extract, P, G };
   }
 
   // 局所探索。評価 f = 手数 + h の小さい順に広げる（h は目安なので最短の保証はない）。
@@ -504,9 +507,24 @@ function solverModule() {
       cands.push({ cx, cy, dc });
     }
     cands.sort((a, b) => a.dc - b.dc); // 中央から評価する（時間切れでも中央付近は見ている）
+    // まず全候補を枠の群（厳密・数ミリ秒）で測る。安定化群が穴の全配置に届く穴は第 2 段階で必ず揃うので最優先。
     const ranked = [];
+    const rest = [];
     for (const c of cands) {
       if (performance.now() > deadline) break;
+      const FG = frameGroup(P, G, goal, c.cy * BW + c.cx, deadline);
+      const entry = { center: [c.cx, c.cy], dc: c.dc, frameFull: !!(FG && FG.full), stabOrder: FG ? FG.stabOrder : 0, frameOrbit: FG ? FG.orbit : 0, frameTotal: FG ? FG.total : 0 };
+      if (entry.frameFull) {
+        const hole = [];
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hole.push((c.cy + dy) * BW + c.cx + dx);
+        ranked.push(Object.assign(entry, { score: 1, orbit: FG.orbit, total: FG.total, cells: hole, keys: null }));
+      } else rest.push(entry);
+    }
+    ranked.sort((a, b) => a.dc - b.dc);
+    // 枠で届かない候補は、短い交換子で動かせる配置の数（楽観的な見積もり）で測る
+    for (const entry of rest) {
+      if (performance.now() > deadline) break;
+      const c = { cx: entry.center[0], cy: entry.center[1] };
       const hole = [];
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) hole.push((c.cy + dy) * BW + c.cx + dx);
       const inHole = new Uint8Array(P.SIZE);
@@ -520,7 +538,6 @@ function solverModule() {
       let total = fact(hole.length);
       for (const v of cnt.values()) total /= fact(v);
       const macros = buildMacros(A, S0, fixedQ, 2, true);
-      // 穴の配置だけを鍵にして広げる
       const key = (S) => String.fromCharCode.apply(null, holeQ.map((q) => S[q]));
       const seen = new Set([key(S0)]);
       let frontier = [S0];
@@ -550,14 +567,14 @@ function solverModule() {
         }
         frontier = next;
       }
-      const score = seen.size / limit; // 1 なら（上限の範囲で）全部に届く
-      // 全部に届かない穴では、届く配置の一覧を持っておく。最後の輪を置くときに
-      // 「置いた結果の穴の配置がこの中に入る」ことを条件にできる。
-      ranked.push({ center: [c.cx, c.cy], score, orbit: seen.size, total, cells: hole, keys: score < 1 ? seen : null });
-      if (score >= 1) break;
+      const score = seen.size / limit;
+      Object.assign(entry, { score, orbit: seen.size, total, cells: hole, keys: score < 1 ? seen : null });
+      if (score >= 1 && !ranked.length) { ranked.push(entry); break; } // 枠で届く穴が無いときは、楽観で全部に届く穴で十分
+      ranked.push(entry);
     }
-    ranked.sort((a, b) => b.score - a.score);
-    return ranked.length ? Object.assign(ranked[0], { ranked }) : null;
+    const scored = ranked.filter((e) => e.score !== undefined);
+    scored.sort((a, b) => (Number(b.frameFull) - Number(a.frameFull)) || (b.score - a.score) || (a.dc - b.dc));
+    return scored.length ? Object.assign(scored[0], { ranked: scored }) : null;
   }
 
   // マス t へ 1 手で中身を送り込める入口の一覧。
@@ -608,6 +625,308 @@ function solverModule() {
     return { P, G, goal, lay, fixed, plan, cls, entries, doMove, undoTo, timeUp, left: P.SIZE };
   }
 
+  // ---- 相対座標の部品ライブラリ ----
+  // 能力の効果は平行移動で不変（tools/invariance.js で実測）。押す場所が互いの効果範囲に
+  // 入らない 2 手の共役と交換子は、能力と押す場所の相対位置だけで並べ替えが決まる。
+  // そこで鍵 (能力A, 向きA, 能力B, 向きB, 相対位置) で一度だけ作り、盤面や窓ごとには
+  // 作り直さずに索引して使う。押す場所が互いの効果範囲に入る組（隣どうしなど）は、
+  // 途中で押す場所の能力が入れ替わって状態に依存するので、従来どおりその場で追う。
+  const REL_R = 3;                 // 相対座標の範囲 −3..3（押す場所 ±2、効果 ±1）
+  const REL_W = 2 * REL_R + 1;
+  const relIdx = (dx, dy) => (dy + REL_R) * REL_W + (dx + REL_R);
+  const PAIR_LIBS = new Map();     // 能力の形の署名 → ライブラリ
+
+  // 能力ごとの相対的な効果の形（押す場所を原点としたサイクル）
+  function relPatterns(P) {
+    const G = geometry(P);
+    const out = [];
+    for (let a = 0; a < P.cyc.length; a++) {
+      let pat = null;
+      for (let i = 0; i < P.SIZE && !pat; i++) {
+        const cyc = P.cyc[a][i];
+        if (!cyc) continue;
+        pat = { cyc: cyc.map((c) => c.map((j) => [G.cx[j] - G.cx[i], G.cy[j] - G.cy[i]])), two: P.ord[a][i] === 2 };
+      }
+      out.push(pat);
+    }
+    return out;
+  }
+
+  function pairLibrary(P) {
+    const pats = relPatterns(P);
+    const sig = JSON.stringify(pats);
+    let lib = PAIR_LIBS.get(sig);
+    if (lib) return lib;
+
+    const nA = pats.length;
+    const labels = new Uint16Array(REL_W * REL_W);
+    const absCyc = (pat, px, py) => pat.cyc.map((c) => c.map(([ox, oy]) => relIdx(px + ox, py + oy)));
+    const suppOf = (cycAbs) => { const s = new Set(); for (const c of cycAbs) for (const k of c) s.add(k); return s; };
+    const dirsOf = (pat) => (pat.two ? [1] : [1, -1]);
+
+    // entries[a][da][b][db].get(offsetKey) → 部品の配列（無ければ undefined）。
+    // 干渉する組は 'interfere'、効果が重ならない組は null を入れる。
+    const table = new Map();
+    const keyOf5 = (a, da, b, db, dx, dy) => (((((a * 2 + (da > 0 ? 0 : 1)) * nA + b) * 2 + (db > 0 ? 0 : 1)) * REL_W + (dx + REL_R)) * REL_W + (dy + REL_R));
+    for (let a = 0; a < nA; a++) {
+      if (!pats[a]) continue;
+      const cycA = absCyc(pats[a], 0, 0);
+      const suppA = suppOf(cycA);
+      for (let b = 0; b < nA; b++) {
+        if (!pats[b]) continue;
+        for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+          if (!dx && !dy) continue;
+          const cycB = absCyc(pats[b], dx, dy);
+          const suppB = suppOf(cycB);
+          let overlap = false;
+          for (const k of suppA) if (suppB.has(k)) { overlap = true; break; }
+          const interfere = suppA.has(relIdx(dx, dy)) || suppB.has(relIdx(0, 0));
+          for (const da of dirsOf(pats[a])) for (const db of dirsOf(pats[b])) {
+            const key = keyOf5(a, da, b, db, dx, dy);
+            if (!overlap) { table.set(key, null); continue; }
+            if (interfere) { table.set(key, 'interfere'); continue; }
+            const entries = [];
+            // 共役 B A B⁻¹ と 交換子 A B A⁻¹ B⁻¹。押す場所の能力は途中で変わらないので、
+            // 印だけを追えば並べ替えが厳密に求まる。
+            for (const seq of [[[1, db], [0, da], [1, -db]], [[0, da], [1, db], [0, -da], [1, -db]]]) {
+              for (let k = 0; k < labels.length; k++) labels[k] = k;
+              for (const [w, d] of seq) applyMove(labels, w === 0 ? cycA : cycB, d);
+              const moved = [];
+              for (let k = 0; k < labels.length; k++) if (labels[k] !== k) moved.push([k, labels[k]]);
+              if (moved.length) entries.push({ seq, moved });
+            }
+            table.set(key, entries);
+          }
+        }
+      }
+    }
+    lib = { pats, get: (a, da, b, db, dx, dy) => table.get(keyOf5(a, da, b, db, dx, dy)) };
+    PAIR_LIBS.set(sig, lib);
+    return lib;
+  }
+
+  // ---- 枠の群（終盤の第 2 段階） ----
+  // 穴 3×3 のまわりで、互いの効果範囲に入らない 9 か所（中央と、5×5 の四隅・辺の中点）を「枠」とする。
+  // 枠のマスの中身は目標の色（＝能力）で確定しており、枠だけを押しているかぎり枠の中身は動かない。
+  // したがって枠の押し手は状態に依らない固定の並べ替えで、本物の置換群を作る。
+  // その群のうち「枠の外の確定マスをすべて元に戻す」部分群（安定化群）を Schreier–Sims で求めると、
+  // 穴の 8 マスをどう並べ替えられるかが厳密に分かる。短い交換子を数える見積もりでは 1% しか
+  // 動かせないと出た盤でも、この安定化群は全部（8! 通り）に届くことが多い。
+  // 生成元には手順（語）を添えて持ち、穴の配置を安定化群の生成元でつないで手順を組み立てる。
+
+  // 置換の道具。配列 p は p[i] = i の行き先。語は [[マス, 向き], ...]。
+  const permCompose = (p, q) => { const r = new Uint8Array(p.length); for (let i = 0; i < p.length; i++) r[i] = q[p[i]]; return r; };
+  const permInverse = (p) => { const r = new Uint8Array(p.length); for (let i = 0; i < p.length; i++) r[p[i]] = i; return r; };
+  const permIsId = (p) => { for (let i = 0; i < p.length; i++) if (p[i] !== i) return false; return true; };
+  const wordInverse = (w) => { const r = new Array(w.length); for (let i = 0; i < w.length; i++) { const [c, d] = w[w.length - 1 - i]; r[i] = [c, -d]; } return r; };
+  const elCompose = (a, b) => ({ p: permCompose(a.p, b.p), w: a.w.concat(b.w) });   // a のあと b
+  const elInverse = (a) => ({ p: permInverse(a.p), w: wordInverse(a.w) });
+
+  // Schreier–Sims（Sims の逐次版）。levels[i].gens は基底点 b_0..b_{i-1} を固定する生成元。
+  // maxWord を超える長さの語は捨てる（語が伸びすぎる元を避けるため。群の一部を失うことはある）。
+  function schreierSims(gens, n, base, maxWord = 4000) {
+    const ident = () => { const p = new Uint8Array(n); for (let i = 0; i < n; i++) p[i] = i; return { p, w: [] }; };
+    const levels = base.map((b) => ({ b, gens: [], orbit: new Map([[b, ident()]]) }));
+    const addLevel = (pt) => levels.push({ b: pt, gens: [], orbit: new Map([[pt, ident()]]) });
+    const rebuildOrbit = (i) => {
+      const L = levels[i];
+      L.orbit = new Map([[L.b, ident()]]);
+      const q = [L.b];
+      while (q.length) {
+        const x = q.shift();
+        const tx = L.orbit.get(x);
+        for (const g of L.gens) {
+          const y = g.p[x];
+          if (!L.orbit.has(y)) { L.orbit.set(y, elCompose(tx, g)); q.push(y); }
+        }
+      }
+    };
+    const strip = (g, start) => {
+      let h = g;
+      for (let j = start; j < levels.length; j++) {
+        const L = levels[j];
+        const y = h.p[L.b];
+        const t = L.orbit.get(y);
+        if (!t) return { h, l: j };
+        h = elCompose(h, elInverse(t));
+      }
+      return { h, l: levels.length };
+    };
+    levels[0].gens = gens.slice();
+    let i = 0;
+    let steps = 0;
+    while (i >= 0) {
+      if (++steps > 20000) break; // 念のための打ち切り
+      rebuildOrbit(i);
+      const L = levels[i];
+      let moved = false;
+      outer:
+      for (const [y, ty] of L.orbit) {
+        for (const s of L.gens) {
+          const z = s.p[y];
+          const tz = L.orbit.get(z);
+          const sg = elCompose(elCompose(ty, s), elInverse(tz));
+          if (permIsId(sg.p)) continue;
+          const r = strip(sg, i + 1);
+          if (permIsId(r.h.p)) continue;
+          if (r.h.w.length > maxWord) continue;
+          if (r.l === levels.length) {
+            let pt = 0;
+            while (r.h.p[pt] === pt) pt++;
+            addLevel(pt);
+          }
+          for (let j = i + 1; j <= r.l; j++) levels[j].gens.push(r.h);
+          i = r.l;
+          moved = true;
+          break outer;
+        }
+      }
+      if (!moved) i--;
+    }
+    return levels;
+  }
+
+  // 穴の中心 center に対する枠の群を作る。
+  // 戻り値: { holeCells（中央以外の 8 マス）, stabGens（8 マス上の並べ替えと語）, full（8! に届くか）}
+  const FRAME_OFFSETS = [[0, 0], [-2, -2], [2, -2], [-2, 2], [2, 2], [-2, 0], [2, 0], [0, -2], [0, 2]];
+  function frameGroup(P, G, goal, center, deadline = Infinity) {
+    const cx = G.cx[center], cy = G.cy[center];
+    const hole = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (dx || dy) hole.push(G.at(cx + dx, cy + dy));
+    const inHole = new Set(hole);
+    const frame = [];
+    for (const [ox, oy] of FRAME_OFFSETS) {
+      const x = cx + ox, y = cy + oy;
+      if (!G.inBoard(x, y)) continue;
+      const i = G.at(x, y);
+      if (P.cyc[goal[i]][i]) frame.push(i);
+    }
+    // 作用する点 = 枠の押し手の効果範囲
+    const cells = new Set();
+    for (const f of frame) for (const c of P.cyc[goal[f]][f]) for (const i of c) cells.add(i);
+    const pts = [...cells];
+    const idx = new Map(pts.map((c, i) => [c, i]));
+    const n = pts.length;
+    if (n > 250) return null;
+    const gens = [];
+    for (const f of frame) {
+      const a = goal[f];
+      for (const dir of (P.ord[a][f] === 2 ? [1] : [1, -1])) {
+        const p = new Uint8Array(n);
+        for (let i = 0; i < n; i++) p[i] = i;
+        for (const c of P.cyc[a][f]) {
+          const L = c.length;
+          for (let j = 0; j < L; j++) p[idx.get(c[j])] = idx.get(c[(j + (dir > 0 ? 1 : L - 1)) % L]);
+        }
+        gens.push({ p, w: [[f, dir]] });
+      }
+    }
+    const fixedPts = pts.filter((c) => !inHole.has(c)).map((c) => idx.get(c));
+    const holePts = hole.filter((c) => idx.has(c)).map((c) => idx.get(c));
+    const levels = schreierSims(gens, n, [...fixedPts, ...holePts]);
+    const m = fixedPts.length;
+    let stabOrder = 1;
+    for (let i = m; i < levels.length; i++) stabOrder *= levels[i].orbit.size;
+    // 安定化群の生成元を、穴 8 マス上の並べ替え（穴の並びの添字）と語に写す
+    const holeIndexOf = new Map(hole.map((c, k) => [c, k]));
+    const seen = new Set();
+    const stabGens = [];
+    for (let i = m; i < levels.length; i++) {
+      for (const g of levels[i].gens) {
+        const q = new Uint8Array(8);
+        for (let k = 0; k < 8; k++) {
+          const c = hole[k];
+          if (!idx.has(c)) { q[k] = k; continue; }
+          const to = pts[g.p[idx.get(c)]];
+          q[k] = holeIndexOf.has(to) ? holeIndexOf.get(to) : k;
+        }
+        const key = String.fromCharCode.apply(null, q);
+        if (seen.has(key) || permIsId(q)) continue;
+        seen.add(key);
+        stabGens.push({ q, w: g.w });
+      }
+    }
+    // 穴 8 マスの色の配置のうち、安定化群で目標から届くものの数（色の重複があるので 8! より少ない）
+    const want = hole.map((c) => goal[c]);
+    const cnt = new Map();
+    for (const c of want) cnt.set(c, (cnt.get(c) || 0) + 1);
+    let total = 40320;
+    for (const v of cnt.values()) { let f = 1; for (let i = 2; i <= v; i++) f *= i; total /= f; }
+    const key = (col) => String.fromCharCode.apply(null, col);
+    const orb = new Set([key(want)]);
+    let frontier = [want];
+    while (frontier.length && orb.size < total) {
+      const next = [];
+      for (const col of frontier) {
+        for (const g of stabGens) {
+          const nc = new Array(8);
+          for (let j = 0; j < 8; j++) nc[g.q[j]] = col[j];
+          const k = key(nc);
+          if (orb.has(k)) continue;
+          orb.add(k);
+          next.push(nc);
+        }
+      }
+      frontier = next;
+    }
+    return { center, holeCells: hole, frame, stabGens, stabOrder, orbit: orb.size, total, full: orb.size >= total };
+  }
+
+  // 枠の群で穴の 8 マスを揃える。枠の外がすべて目標どおりで、中央も目標の色であること。
+  // 配置（8 マスの色の並び）を頂点、安定化群の生成元を辺として、語の長さを重みに Dijkstra。
+  function frameSolve(B, center, deadline) {
+    const { P, G, lay, goal } = B;
+    const FG = frameGroup(P, G, goal, center, deadline);
+    if (!FG || !FG.stabGens.length) return null;
+    const hole = FG.holeCells;
+    const cur = hole.map((c) => lay[c]);
+    const want = hole.map((c) => goal[c]);
+    const key = (col) => String.fromCharCode.apply(null, col);
+    const goalKey = key(want);
+    if (key(cur) === goalKey) return [];
+    const dist = new Map([[key(cur), 0]]);
+    const prev = new Map();
+    const col = new Map([[key(cur), cur]]);
+    // 単純な優先度つき探索（配置は最大 40,320 なので配列の線形走査で足りる）
+    const buckets = [];
+    const push = (k, d) => { (buckets[d] || (buckets[d] = [])).push(k); };
+    push(key(cur), 0);
+    let expanded = 0;
+    for (let d = 0; d < buckets.length; d++) {
+      const bucket = buckets[d];
+      if (!bucket) continue;
+      for (let bi = 0; bi < bucket.length; bi++) {
+        const k = bucket[bi];
+        if (dist.get(k) !== d) continue;
+        if ((expanded++ & 255) === 0 && performance.now() > deadline) return null;
+        const c0 = col.get(k);
+        for (let gi = 0; gi < FG.stabGens.length; gi++) {
+          const g = FG.stabGens[gi];
+          // 並べ替え q: 位置 k の中身は位置 q[k] へ
+          const nc = new Array(8);
+          for (let j = 0; j < 8; j++) nc[g.q[j]] = c0[j];
+          const nk = key(nc);
+          const nd = d + g.w.length;
+          const old = dist.get(nk);
+          if (old !== undefined && old <= nd) continue;
+          dist.set(nk, nd);
+          prev.set(nk, [k, gi]);
+          col.set(nk, nc);
+          push(nk, nd);
+          if (nk === goalKey) {
+            // 語をつなぐ
+            const parts = [];
+            let at = nk;
+            while (at !== key(cur)) { const [pk, pg] = prev.get(at); parts.push(FG.stabGens[pg].w); at = pk; }
+            parts.reverse();
+            return parts.flat();
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   // ---- きれいな手順（マクロ） ----
   // 確定マスを終わりに元どおりにする短い手順を、押せる場所の組み合わせから機械的に作る。
   //   単発 A        … 効果範囲が確定マスに触れないもの
@@ -650,12 +969,30 @@ function solverModule() {
     const cat = (...ms) => ms.flatMap((m) => m.seq);
 
     const byPerm = new Map();
+    // 印と色の作業用配列。初期化は型付き配列のコピー（ネイティブ）で済ませる。
+    const ident = new Uint16Array(L);
+    for (let k = 0; k < L; k++) ident[k] = k;
     const labels = new Uint16Array(L);
     const S = new Uint8Array(L);
-    // 手順を実際に追って並べ替えを求め、確定マスが動かないものだけ登録する。
-    // 登録したものは { seq, sup } として返し、次の段の材料にもする。
+    const isFixed = new Uint8Array(L);
+    for (const k of fixedQ) isFixed[k] = 1;
+    // labels に並べ替えが入った状態で呼ぶ。動いたマスを集め、確定マスが崩れていなければ登録する。
+    const finish = (seq) => {
+      const movedTo = [];
+      for (let k = 0; k < L; k++) if (labels[k] !== k) movedTo.push(k);
+      if (!movedTo.length) return null;
+      for (const k of movedTo) if (isFixed[k] && (!colorClean || S0[labels[k]] !== S0[k])) return null; // 確定マスが崩れる
+      const key = String.fromCharCode.apply(null, labels);
+      const prev = byPerm.get(key);
+      if (prev && prev.seq.length <= seq.length) return prev;
+      const m = { seq: seq.slice(), sup: new Set(movedTo), two: false };
+      byPerm.set(key, m);
+      return m;
+    };
+    // 手順を実際に追って並べ替えを求める（押す場所の能力が途中で変わる組もこれで厳密になる）
     const consider = (seq) => {
-      for (let k = 0; k < L; k++) { labels[k] = k; S[k] = S0[k]; }
+      labels.set(ident);
+      S.set(S0);
       for (const [ti, dir] of seq) {
         const t = arena.table[ti];
         const mv = t.byA[S[t.q]];
@@ -663,29 +1000,46 @@ function solverModule() {
         applyMove(S, mv.cyc, dir);
         applyMove(labels, mv.cyc, dir);
       }
-      const sup = new Set();
-      for (let k = 0; k < L; k++) if (labels[k] !== k) sup.add(k);
-      if (!sup.size) return null;
-      if (colorClean) { for (const k of fixedQ) if (S[k] !== S0[k]) return null; } // 確定マスの色が変わった
-      else { for (const k of fixedQ) if (sup.has(k)) return null; }                 // 確定マスが動いた
-      const key = String.fromCharCode.apply(null, labels);
-      const prev = byPerm.get(key);
-      if (prev && prev.seq.length <= seq.length) return prev;
-      const m = { seq: seq.slice(), sup, two: false };
-      byPerm.set(key, m);
-      return m;
+      return finish(seq);
     };
-
     // 1 段目: 単発、二度押し、共役、交換子
     for (const A of singles) {
       consider(A.seq);
       if (!A.two) consider(cat(A, A));
     }
+    // 2 手の組は相対座標のライブラリから引く。部品の並べ替えを窓の座標に写して、
+    // その場で追ったときと同じ形（印の並び）で登録する。
+    const { P, G } = arena;
+    const lib = pairLibrary(P);
+    // ライブラリの部品を窓の座標に写して登録する（手順を追わずに並べ替えが分かる）
+    const registerRel = (entry, ti, tj, cellA) => {
+      const ax = G.cx[cellA], ay = G.cy[cellA];
+      labels.set(ident);
+      for (const [to, from] of entry.moved) {
+        const tx = ax + (to % REL_W) - REL_R, ty = ay + Math.floor(to / REL_W) - REL_R;
+        const fx = ax + (from % REL_W) - REL_R, fy = ay + Math.floor(from / REL_W) - REL_R;
+        labels[arena.pos[G.at(tx, ty)]] = arena.pos[G.at(fx, fy)];
+      }
+      finish(entry.seq.map(([w, d]) => [w === 0 ? ti : tj, d]));
+    };
     for (const A of singles) {
+      const ti = A.seq[0][0], da = A.seq[0][1];
+      const cellA = arena.table[ti].cell;
       for (const B of singles) {
-        if (A === B || A.seq[0][0] === B.seq[0][0] || !overlap(A, B)) continue;
-        consider(cat(B, A, inv(B)));            // 共役
-        consider(cat(A, B, inv(A), inv(B)));    // 交換子
+        const tj = B.seq[0][0], db = B.seq[0][1];
+        if (ti === tj) continue;
+        const cellB = arena.table[tj].cell;
+        const dx = G.cx[cellB] - G.cx[cellA], dy = G.cy[cellB] - G.cy[cellA];
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) continue;
+        const res = lib.get(S0[arena.table[ti].q], da, S0[arena.table[tj].q], db, dx, dy);
+        if (res === null || res === undefined) continue;          // 効果が重ならない
+        if (res === 'interfere') {                                // 状態に依存するのでその場で追う
+          if (!overlap(A, B)) continue;
+          consider(cat(B, A, inv(B)));
+          consider(cat(A, B, inv(A), inv(B)));
+          continue;
+        }
+        for (const e of res) registerRel(e, ti, tj, cellA);
       }
     }
     // 2 段目: 1 段目の手順 M と、それに重なる単発 A から
@@ -1186,6 +1540,37 @@ function solverModule() {
       B.required = null;
       return ok;
     };
+    // 第 2 段階（枠の群）。未確定のマスがすべて穴 3×3 の中にあるときだけ使える。
+    // 穴の 8 マスをいったん未確定に戻し、中央を目標の色にしてから、枠の押し手だけで 8 マスを揃える。
+    // 語は長くなりうるが厳密で、あとで経路短縮がかかる。
+    let frameTried = false;
+    const tryFrame = (t) => {
+      if (frameTried || mode !== 'hole' || !center) return false;
+      const ctr = G.at(center[0], center[1]);
+      const holeSet = new Set(G.within([ctr], 1));
+      for (let i = 0; i < P.SIZE; i++) if (!fixed[i] && !holeSet.has(i)) return false;
+      frameTried = true;
+      const t1 = performance.now();
+      const mark0 = plan.length;
+      const wasFixed = [...holeSet].map((i) => fixed[i]);
+      for (const i of holeSet) fixed[i] = 0;
+      let ready = lay[ctr] === goal[ctr] || place(B, ctr, goal[ctr], 0);
+      let word = null;
+      if (ready) {
+        fixed[ctr] = 1;
+        word = frameSolve(B, ctr, B.timeUp.deadline);
+        if (word) {
+          for (const [i, dir] of word) B.doMove(i, dir);
+          let good = true;
+          for (let i = 0; i < P.SIZE; i++) if (lay[i] !== goal[i]) { good = false; break; }
+          if (!good) { B.undoTo(mark0); word = null; }
+        }
+      }
+      if (word) { for (const i of holeSet) fixed[i] = 1; left = 0; }
+      else { B.undoTo(mark0); [...holeSet].forEach((i, k) => { fixed[i] = wasFixed[k]; }); }
+      trace.push({ t, what: 'frame', ok: !!word, len: word ? word.length : 0, ms: Math.round(performance.now() - t1) });
+      return !!word;
+    };
     for (const t of order) {
       B.left = left;
       if (B.timeUp()) { trace.push({ t, what: 'timeout' }); return result(false); }
@@ -1202,6 +1587,8 @@ function solverModule() {
         let ok = tryEnd(left <= 4 ? 300000 : 120000);
         trace.push({ t, what: 'end', left, ok, ms: Math.round(performance.now() - t0) });
         if (ok) return result(true);
+        // 第 2 段階: 枠の群で穴を揃える（厳密）
+        if (!ok && tryFrame(t)) return result(true);
         // 穴の配置が届く範囲に無いときは、直前に置いたマスを別の手順で置き直して配置を変える。
         // 届く配置の割合が 3 割でも、数回やり直せばたいてい当たる。
         if (!retried && mode === 'hole' && center) {
@@ -1273,8 +1660,9 @@ function solverModule() {
       if (lay[t] === goal[t] || place(B, t, goal[t], 0)) { fixed[t] = 1; left--; }
     }
     const t0 = performance.now();
-    const ok = tryEnd(400000);
+    let ok = tryEnd(400000);
     trace.push({ t: -1, what: 'end', left, ok, ms: Math.round(performance.now() - t0) });
+    if (!ok && tryFrame(-1)) ok = true;
     return result(ok);
   }
 
@@ -1438,7 +1826,7 @@ function solverModule() {
     let partial = null;
     const G = geometry(P);
     const hole = Math.min(G.W, G.H) >= 5 ? pickHole(P, G, goal, share(0.12)) : null;
-    tried.hole = hole ? `${hole.center} ${hole.orbit}/${hole.total}` : null;
+    tried.hole = hole ? `${hole.center} ${hole.orbit}/${hole.total}${hole.frameFull ? ' frame' : ''}` : null;
     // 穴は評価の高い順に 3 つまで試す（豊かな穴が無い盤では、当たる配置になるかは運もある）
     const attempts = [];
     if (hole) for (const h of hole.ranked.slice(0, 3)) attempts.push({ mode: 'hole', center: h.center, info: h, label: `hole${h.center}` });
