@@ -2,13 +2,14 @@
 // アプリとしてインストールできるようにするためと、通信が無くても遊べるようにするため。
 // このゲームはサーバに何も問い合わせないので、一式を持っておけばそれで完結する。
 //
-// 中身を書き換えたら VERSION を上げること。上げると新しい箱に一式を入れ直し、
-// 古い箱は activate で捨てる。版は丸ごと入れ替わるので、
-// 「新しい HTML と古い script.js」のような食い違いは起きない。
+// 取り方は「まず通信、駄目なら箱」。配信し直したぶんは次に開いたときに必ず反映され、
+// 通信が無いときは箱の中身で遊べる。
 //
-// skipWaiting は呼ばない。開いている画面は最後まで同じ版のまま動き、
-// 新しい版は次に開き直したときに効く。遊んでいる最中に中身が入れ替わらないように。
-const VERSION = 'v1';
+// 以前は「まず箱」にしていたが、新しい版を配るのに VERSION の手上げが要り、
+// 上げ忘れると古い一式が配られ続けた（実際に 3 回続けて上げ忘れた）。
+// 更新の合図を人の手に委ねない形にしてある。VERSION は箱の名前を変えて
+// 作り直すためだけのもので、上げ忘れても新しい中身は届く。
+const VERSION = 'v2';
 const SHELL = `glyph-shift-shell-${VERSION}`;
 const FONTS = 'glyph-shift-fonts';
 
@@ -32,7 +33,8 @@ const FILES = [
 self.addEventListener('install', (e) => {
   // 取りこぼしを黙って見逃さないため addAll を使う（1 つでも落ちれば install ごと失敗し、
   // 古い版が生き残る。中途半端な箱ができるよりそのほうがいい）
-  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)));
+  // 入れ終えたらすぐ交代する。待たせると、全部のタブを閉じるまで古い版が居座る。
+  e.waitUntil(caches.open(SHELL).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -59,14 +61,13 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
 
   if (url.origin === self.location.origin) {
-    // 同じ生地は箱を先に見る。版ごと入れ替える方針なので、
-    // 1 回の表示のなかで新旧が混ざることはない。
+    // 同じ生地はまず通信を見て、取れたら箱も更新する。
+    // 取れないとき（機内モードなど）だけ箱から返す。
     e.respondWith(
-      caches.match(req, { ignoreSearch: true })
+      fetchAndKeep(SHELL, req).catch(() => caches.match(req, { ignoreSearch: true })
+        // 箱にも無いとき、画面への求めには置いてある画面を返す
         .then((hit) => hit
-          || fetchAndKeep(SHELL, req)
-            // 通信も箱も駄目なとき、画面への求めには置いてある画面を返す
-            .catch(() => (req.mode === 'navigate' ? caches.match('index.html') : Promise.reject(new Error('offline')))))
+          || (req.mode === 'navigate' ? caches.match('index.html') : Promise.reject(new Error('offline')))))
     );
     return;
   }
