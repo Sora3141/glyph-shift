@@ -819,13 +819,17 @@ function showClear() {
     : `そろった！ ${moves} 手 — 設定から次の盤面を作れます`;
 }
 
-// ---- 自動で揃える ----
+// ---- 解説（自動で揃える） ----
 // 手順どおりに 1 手ずつ押していく。1 手ごとに手順を読み直すので、
 // 途中で解き直しが入っても破綻しない。
-let autoSolving = false;
-let autoStep = null;   // 始めるときに決めた進め方 { interval, chunk }
+// 勝手に進むだけでなく、止めて 1 手ずつ進める・戻すこともできる。
+let autoSolving = false;   // 解説を開いているか
+let autoPlaying = false;   // そのうち、勝手に進んでいるか
+let autoStep = null;        // 始めるときに決めた進め方 { interval, chunk }
 let autoSolvedFlag = false;
 let autoTimer = null;
+const autoHist = [];        // 解説のあいだに進めた手。戻すときに逆から取り出す
+let autoMoves0 = 0;         // 解説を開いたときの手数。全部戻したらここへ返す
 
 // 1 手ずつ見せられる上限。これを超える手順は一気に揃える。
 // 混ぜ切った大きい盤では、保険の手順が数千〜数万手になることがあるため。
@@ -864,12 +868,16 @@ function closeConfirm() {
 }
 const autoBarEl = document.getElementById('autoBar');
 const autoTextEl = document.getElementById('autoText');
+const autoBackEl = document.getElementById('autoBack');
+const autoPlayEl = document.getElementById('autoPlay');
+const autoNextEl = document.getElementById('autoNext');
 
 function askAutoSolve() {
   if (autoSolving || locked) return;
-  askConfirm('自動で揃える',
-    '盤面が動いて目標の柄まで揃います。<br>この盤面は自分で解けなくなります。',
-    '揃える', startAutoSolve);
+  askConfirm('解説を見る',
+    '目標の柄まで盤面が動きます。止めて <strong>1 手ずつ進める・戻す</strong> こともできます。'
+    + '<br>この盤面は自分で解けなくなります。',
+    '見る', startAutoSolve);
 }
 
 // 盤面を作り直す。サイズとブロック数の設定は据え置きで、
@@ -886,39 +894,33 @@ function askRegenerate() {
 function startAutoSolve() {
   closeConfirm();
   if (autoSolving || locked) return;
-  // 手順の計算が終わるまで入力を受けないよう、先に自動モードに入る
+  // 手順の計算が終わるまで入力を受けないよう、先に解説モードに入る
   autoSolving = true;
+  autoPlaying = false;
+  autoHist.length = 0;
+  autoMoves0 = moves;
   autoBarEl.hidden = false;
+  autoBarEl.classList.add('paused');
+  autoBackEl.disabled = true;
+  autoNextEl.disabled = true;
+  autoPlayEl.disabled = true;
   autoTextEl.textContent = '手順を計算しています…';
   requestSolve(() => {
-    if (!autoSolving) return;              // 計算中に「止める」を押した
+    if (!autoSolving) return;              // 計算中に「やめる」を押した
     if (locked || isSolved()) { stopAutoSolve(); return; }
-    autoSolvedFlag = true;
     // 手順がまったく無いときだけは、そのまま完成形へ動かす
-    if (!activeRuns().length) { stopAutoSolve(); snapToGoal(); return; }
+    if (!activeRuns().length) { stopAutoSolve(); autoSolvedFlag = true; snapToGoal(); return; }
     autoStep = autoPace(planCost(activeRuns()));
-    stepAuto();
+    autoPlayEl.disabled = false;
+    playAuto();
   }, true);
 }
 
-function stepAuto() {
-  if (!autoSolving) return;
-  const plan = activeRuns();
-  if (locked || isSolved() || !plan.length) { stopAutoSolve(); return; }
-
-  const left = planCost(plan);
-  if (!autoStep) autoStep = autoPace(left);
-  const { interval, chunk } = autoStep;
-  autoTextEl.textContent = `揃えています… 残り ${left} 手`;
-
-  // まとめて進めるぶんも 1 回の滑らかな移動として見せる。
-  // 手順の順番どおりに進むので、揃っていく過程はそのまま見える。
-  // 追える大きさのときだけ滑らせる。次の刻みが来る前に必ず到着させる。
-  // まとめて動かすときは滑らせない（途中の隙間が目立つうえ、追えもしない）。
-  const slide = chunk <= 3 ? Math.min(300, Math.round(interval * 0.75)) : 0;
+// 手順どおりに count 手すすめる。戻せるように、進めた手は控えておく。
+function advanceAuto(count, slide) {
   let last = null;
   animatePlacement(() => {
-    for (let c = 0; c < chunk; c++) {
+    for (let c = 0; c < count; c++) {
       const runs = activeRuns();
       if (!runs.length) break;
       const r = runs[0];
@@ -926,14 +928,93 @@ function stepAuto() {
       const dir = r.n <= r.order - r.n ? 1 : -1;
       const ab = abilityAt(r.i);
       if (!applyMoveState(r.i, dir)) break;
+      autoHist.push([r.i, dir]);
       last = { i: r.i, dir, ab };
     }
   }, slide);
   if (last) {
     flashSlot(last.i, last.dir);
     Sfx.move(last.ab, last.dir);      // 音は 1 回ぶんだけ
+    autoSolvedFlag = true;
   }
+  return last;
+}
+
+// 解説のあいだに進めた手を 1 つ取り消す。押した手はいつでも逆に打てるので、
+// 逆向きに打ち直すだけでよい（手数も差し引きで元に戻る）。
+function undoAuto() {
+  if (!autoSolving || !autoHist.length) return;
+  pauseAuto();
+  const [i, dir] = autoHist.pop();
+  const ab = abilityAt(i);            // 押したマスは動かないので前後で変わらない
+  animatePlacement(() => applyMoveState(i, -dir), 300);
+  flashSlot(i, -dir);
+  Sfx.move(ab, -dir);
+  if (!autoHist.length) {
+    // 解説を開く前と同じ盤面に戻った。手数もそこへ返す。
+    // （手数は「同じマスを続けて押したぶん」を差し引いて数えるので、
+    //   進めて戻すと往復ぶんが残ってしまう。解説の操作は player の手数ではない。）
+    autoSolvedFlag = false;
+    commitRun();
+    moves = autoMoves0;
+    run = { i: -1, d: 0, order: 1 };
+  }
+  markAuto();
+}
+
+// 1 手だけ進める
+function nextAuto() {
+  if (!autoSolving || locked || isSolved()) return;
+  pauseAuto();
+  advanceAuto(1, 300);
   if (isSolved()) { showClear(); return; }
+  markAuto();
+}
+
+function playAuto() {
+  if (!autoSolving || locked || isSolved()) return;
+  autoPlaying = true;
+  markAuto();
+  stepAuto();
+}
+
+function pauseAuto() {
+  autoPlaying = false;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  markAuto();
+}
+
+const toggleAuto = () => (autoPlaying ? pauseAuto() : playAuto());
+
+// ボタンの出方と案内の文字を、今の状態に合わせる
+function markAuto() {
+  if (!autoSolving) return;
+  autoBarEl.classList.toggle('paused', !autoPlaying);
+  autoPlayEl.setAttribute('aria-label', autoPlaying ? '一時停止' : '再生');
+  autoPlayEl.title = autoPlaying ? '一時停止' : '再生';
+  autoBackEl.disabled = !autoHist.length;
+  autoNextEl.disabled = locked || isSolved() || !activeRuns().length;
+  const left = planCost(activeRuns());
+  autoTextEl.textContent = autoPlaying
+    ? `揃えています… 残り ${left} 手`
+    : `止まっています — 残り ${left} 手`;
+}
+
+function stepAuto() {
+  autoTimer = null;
+  if (!autoSolving || !autoPlaying) return;
+  if (locked || isSolved() || !activeRuns().length) { stopAutoSolve(); return; }
+
+  if (!autoStep) autoStep = autoPace(planCost(activeRuns()));
+  const { interval, chunk } = autoStep;
+
+  // まとめて進めるぶんも 1 回の滑らかな移動として見せる。
+  // 手順の順番どおりに進むので、揃っていく過程はそのまま見える。
+  // 追える大きさのときだけ滑らせる。次の刻みが来る前に必ず到着させる。
+  // まとめて動かすときは滑らせない（途中の隙間が目立つうえ、追えもしない）。
+  advanceAuto(chunk, chunk <= 3 ? Math.min(300, Math.round(interval * 0.75)) : 0);
+  if (isSolved()) { showClear(); return; }
+  markAuto();
   autoTimer = setTimeout(stepAuto, interval);
 }
 
@@ -945,7 +1026,9 @@ function snapToGoal() {
 
 function stopAutoSolve() {
   autoSolving = false;
+  autoPlaying = false;
   autoStep = null;
+  autoHist.length = 0;
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   autoBarEl.hidden = true;
 }
@@ -1343,6 +1426,9 @@ document.getElementById('newBtn').addEventListener('click', askRegenerate);
 confirmYesEl.addEventListener('click', () => { const a = confirmAction; if (a) a(); });
 document.getElementById('confirmNo').addEventListener('click', closeConfirm);
 document.getElementById('autoStop').addEventListener('click', stopAutoSolve);
+autoBackEl.addEventListener('click', undoAuto);
+autoPlayEl.addEventListener('click', toggleAuto);
+autoNextEl.addEventListener('click', nextAuto);
 
 // ---- パネルの開閉 ----
 // 設定パネルとブロック説明パネルを同じ仕組みで扱う。片方を開くともう片方は閉じる。
