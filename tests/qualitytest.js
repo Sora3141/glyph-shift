@@ -24,7 +24,13 @@ console.log(`  最短が確定した場合: 「${el('log').textContent}」`);
   W = H = 8; SIZE = 64; buildDom(); types = 7; newPuzzle(5);
   showHint();
   ok(hintPlan !== null, '大きい盤で手順が出ない');
-  if (hintPlan && !hintPlan.optimal) {
+  // 出方は 3 通りある。探して見つけた手順なら手数を出し、保険の手順（逆手順）しか
+  // 無いときは手数を出さない。1 万手を超える数字は遊ぶ人には意味がないため。
+  if (hintPlan && hintPlan.method === 'reverse') {
+    ok(!/残り \d+ 手|最短 \d+ 手/.test(el('log').textContent),
+       `保険の手順なのに手数を出している: ${el('log').textContent}`);
+    console.log(`  保険の手順しか無い場合: 「${el('log').textContent}」`);
+  } else if (hintPlan && !hintPlan.optimal) {
     ok(el('log').textContent.includes('かぎりません'), `表示: ${el('log').textContent}`);
     console.log(`  最短と確定できない場合: 「${el('log').textContent}」`);
   } else {

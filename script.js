@@ -440,17 +440,23 @@ function blinkHint() {
   const how = r.n <= back
     ? `光っているマスを ${r.n} 回押す`
     : `光っているマスを ${back} 回長押し（逆回り）`;
-  // 最短だと確定できたかどうかも伝える
-  const left = planCost(plan);
-  const quality = !hintPlan ? ''
-    : hintPlan.optimal ? ` / ここから最短 ${left} 手`
-    : ` / 残り ${left} 手（最短とはかぎりません）`;
+  // 残りの手数は、実際に探して見つけた手順のときだけ意味がある。
+  // 保険の手順（シャッフルをそのまま逆再生するもの）は 1 万手を超えることがあり、
+  // それを「残り 18317 手」と出しても遊ぶ人には何の情報でもなく、
+  // 詰んだように見えるだけ。光らせる手自体は正しいので、数字だけ伏せる。
+  const real = hintPlan && hintPlan.method !== 'reverse';
+  const quality = real
+    ? (hintPlan.optimal
+      ? ` / ここから最短 ${planCost(plan)} 手`
+      : ` / 残り ${planCost(plan)} 手（最短とはかぎりません）`)
+    : hintBusy ? HINT_SEARCHING_NOTE : ' / まだ短い手順が見つかっていません';
   logEl.textContent = how + quality;
   hintTimer = setTimeout(clearHint, HINT_BLINK_MS);
 }
 
 // 1 回押したら光るのは 1 か所きり。あとから別のマスへ飛ばさない。
 const HINT_SEARCHING = '手を探しています…';
+const HINT_SEARCHING_NOTE = ' / 短い手順を探しています…';
 
 function hintAfterSolve() {
   blinkHint();
@@ -767,6 +773,11 @@ function finishSolve(id, res, partial = false) {
     if (res && res.method === 'reverse' && !longSolveTried && worker) {
       longSolveTried = true;
       requestSolve(null, false, true, HINT_BUDGET_LONG);
+    }
+    // 探し直しで短い手順が見つかったら、出したままの案内を新しくする。
+    // 光らせる場所は動かさない（押した時点で決めたものを尊重する）。
+    if (hintPlan && hintPlan.method !== 'reverse' && logEl.textContent.endsWith(HINT_SEARCHING_NOTE)) {
+      logEl.textContent = `短い手順が見つかりました（残り ${planCost(activeRuns())} 手）。もう一度ヒントを押してください`;
     }
   }
   // 待っている人には最初の返事で応える（ヒントの点滅には十分）。最終結果を待つものは残す。
