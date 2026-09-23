@@ -75,10 +75,34 @@ console.log('\n進むだけで最後まで揃う');
 guard = 0;
 while (!isSolved() && guard++ < 500) el('autoNext').fire('click', {});
 ok(isSolved(), `進むだけでは揃わない（${guard} 回）`);
-ok(el('autoBar').hidden === true, '揃ったのに再生バーが残っている');
-ok(autoSolving === false, '揃ったのに解説モードのまま');
 ok(el('log').textContent.includes('自動で揃えました'), `完成の文言: ${el('log').textContent}`);
 console.log(`  ${guard} 回の「進む」で揃った`);
+
+console.log('\n揃っても操作バーは残り、戻って見直せる');
+ok(el('autoBar').hidden === false, '揃った途端に操作バーが消えている');
+ok(autoSolving === true, '揃った途端に解説モードが終わっている');
+ok(el('autoNext').disabled === true, '進める手が無いのに「進む」が押せる');
+ok(el('autoPlay').disabled === true, '進める手が無いのに「再生」が押せる');
+ok(el('autoBack').disabled === false, '揃ったあとに「戻す」が押せない');
+ok(el('autoText').textContent.includes('そろいました'), `案内: ${el('autoText').textContent}`);
+
+// 戻すと完成の表示も解ける
+{
+  const n = autoHist.length;
+  el('autoBack').fire('click', {});
+  ok(!isSolved(), '戻したのに揃ったまま');
+  ok(autoHist.length === n - 1, '戻すで 1 手ぶん戻っていない');
+  ok(locked === false, '戻したのに盤が固まったまま');
+  ok(!el('log')._cls.has('done'), '戻したのに完成の表示が残っている');
+  ok(el('autoNext').disabled === false, '戻したのに「進む」が押せない');
+  ok(el('autoPlay').disabled === false, '戻したのに「再生」が押せない');
+  console.log('  戻すと完成の表示が解け、また進められる');
+
+  // もう一度進めれば揃う
+  el('autoNext').fire('click', {});
+  ok(isSolved(), '戻して進め直しても揃わない');
+  ok(el('autoBar').hidden === false, '揃え直したら操作バーが消えた');
+}
 
 console.log('\n再生だけで最後まで揃う');
 newPuzzle(useSeed + 1);
@@ -87,7 +111,16 @@ el('confirmYes').fire('click', {});
 guard = 0;
 while (!isSolved() && guard++ < 2000) tick();
 ok(isSolved(), `再生だけでは揃わない（${guard} 拍）`);
-ok(el('autoBar').hidden === true, '揃ったのに再生バーが残っている');
+ok(el('autoBar').hidden === false, '揃った途端に操作バーが消えている');
+ok(el('autoBack').disabled === false, '揃ったあとに「戻す」が押せない');
+// 揃ったあとは刻みが来ても勝手に動かない
+{
+  const held = snap();
+  tick();
+  ok(snap() === held, '揃ったあとに勝手に進んだ');
+}
+el('autoStop').fire('click', {});
+ok(el('autoBar').hidden === true, '「やめる」で閉じない');
 
 console.log('\nやめる');
 newPuzzle(useSeed + 2);

@@ -861,11 +861,21 @@ function fire(i, dir = 1) {
 
 
 // 完成の知らせ。盤面を隠さないよう、全画面では出さない。
+// 揃った表示を解く。解説で揃ったところから戻るときに使う。
+function unClear() {
+  locked = false;
+  gridEl.classList.remove('cleared');
+  logEl.classList.remove('done');
+  logEl.textContent = 'タイルをクリック';
+}
+
 function showClear() {
   commitRun();
   Sfx.solved();
   locked = true;
-  stopAutoSolve();
+  // 解説を見ているあいだは、揃ったあとも操作バーを残す。戻って見直せるようにするため。
+  // 閉じるのは「やめる」を押したときだけ。
+  if (autoSolving) pauseAuto(); else stopAutoSolve();
   clearHint();
 
   gridEl.classList.remove('cleared');
@@ -1004,6 +1014,7 @@ function advanceAuto(count, slide) {
 function undoAuto() {
   if (!autoSolving || !autoHist.length) return;
   pauseAuto();
+  if (locked) unClear();      // 揃ったところから戻る。完成の表示も解く
   const [i, dir] = autoHist.pop();
   const ab = abilityAt(i);            // 押したマスは動かないので前後で変わらない
   animatePlacement(() => applyMoveState(i, -dir), 300);
@@ -1052,17 +1063,21 @@ function markAuto() {
   autoPlayEl.setAttribute('aria-label', autoPlaying ? '一時停止' : '再生');
   autoPlayEl.title = autoPlaying ? '一時停止' : '再生';
   autoBackEl.disabled = !autoHist.length;
-  autoNextEl.disabled = locked || isSolved() || !activeRuns().length;
+  const done = locked || isSolved() || !activeRuns().length;
+  autoNextEl.disabled = done;
+  autoPlayEl.disabled = done;
   const left = planCost(activeRuns());
-  autoTextEl.textContent = autoPlaying
-    ? `揃えています… 残り ${left} 手`
-    : `止まっています — 残り ${left} 手`;
+  autoTextEl.textContent = done
+    ? (isSolved() ? 'そろいました — 戻って見直せます' : '進める手がありません')
+    : autoPlaying
+      ? `揃えています… 残り ${left} 手`
+      : `止まっています — 残り ${left} 手`;
 }
 
 function stepAuto() {
   autoTimer = null;
   if (!autoSolving || !autoPlaying) return;
-  if (locked || isSolved() || !activeRuns().length) { stopAutoSolve(); return; }
+  if (locked || isSolved() || !activeRuns().length) { pauseAuto(); return; }
 
   if (!autoStep) autoStep = autoPace(planCost(activeRuns()));
   const { interval, chunk } = autoStep;

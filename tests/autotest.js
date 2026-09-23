@@ -31,7 +31,11 @@ ok(locked, '揃ったのにロックされていない');
 ok(el('log')._cls.has('done'), '完成の知らせが出ていない');
 ok(el('log').textContent.includes('自動で揃えました'), `表示: ${el('log').textContent}`);
 ok(gridEl._cls.has('cleared'), '盤面の完成演出が付いていない');
-ok(!autoSolving && el('autoBar').hidden, '再生中の表示が残っている');
+// 揃っても操作バーは残す（戻って見直せるようにするため）。閉じるのは「やめる」。
+ok(autoSolving && !el('autoBar').hidden, '揃った途端に操作バーが消えている');
+ok(el('autoBack').disabled === false, '揃ったあとに「戻す」が押せない');
+el('autoStop').fire('click', {});
+ok(!autoSolving && el('autoBar').hidden, '「やめる」で閉じない');
 ok(board.some((v, i) => v !== boardBefore[i]), '盤面が動いていない');
 console.log('  承諾すると順に動いて揃い、自動で揃えたと表示される: OK');
 
