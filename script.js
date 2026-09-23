@@ -158,6 +158,10 @@ const iconSvg = (abIndex) => Glyphs.draw(glyphStyle, ABILITIES[abIndex].cells(0,
 // UI のアクセントと紛れる菫色の帯（248〜292°）は使っていない。
 const bgOf = (abIndex) => ABILITIES[abIndex].color;
 const INK = 'rgba(10, 12, 20, .82)';
+// 地が暗いマス（何も起きないマス）では、暗いインクだと絵柄が沈む。
+// 明るさで描く色を選ぶので、この先どんな色を足しても勝手に釣り合う。
+const INK_ON_DARK = 'rgba(238, 236, 247, .72)';
+const inkOf = (abIndex) => (Number(ABILITIES[abIndex].color.match(/ (\d+)%\)$/)[1]) < 45 ? INK_ON_DARK : INK);
 
 // ---- 柄（目標の並び） ----
 // 盤の横 W・縦 H と使うブロック数 K から作れる柄。fn は各マスの色番号（0〜K-1）を返す。
@@ -350,7 +354,7 @@ function paintTiles() {
   for (let v = 0; v < SIZE; v++) {
     const ab = tileAbility[v];
     tiles[v].style.background = bgOf(ab);
-    tiles[v].style.color = INK;
+    tiles[v].style.color = inkOf(ab);
     tiles[v].innerHTML = iconSvg(ab);
   }
 }
@@ -396,7 +400,7 @@ function renderGoal() {
     const t = document.createElement('div');
     t.className = 'tile';
     t.style.background = bgOf(tileAbility[i]);
-    t.style.color = INK;
+    t.style.color = inkOf(tileAbility[i]);
     t.innerHTML = iconSvg(tileAbility[i]);
     slot.append(t);
     goalGridEl.append(slot);
@@ -410,7 +414,7 @@ function renderLegend() {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.style.background = bgOf(ab);
-    chip.style.color = INK;
+    chip.style.color = inkOf(ab);
     chip.innerHTML = iconSvg(ab);
     const txt = document.createElement('span');
     txt.textContent = ABILITIES[ab].name;
@@ -500,7 +504,7 @@ function renderPanel() {
       const chip = document.createElement('span');
       chip.className = 'chip';
       chip.style.background = bgOf(k);
-      chip.style.color = INK;
+      chip.style.color = inkOf(k);
       chip.innerHTML = iconSvg(k);
 
       const main = document.createElement('div');
@@ -1406,7 +1410,7 @@ function fillGlyphSeg() {
     const box = document.createElement('span');
     box.className = 'sample';
     box.style.background = bgOf(GLYPH_SAMPLE);
-    box.style.color = INK;
+    box.style.color = inkOf(GLYPH_SAMPLE);
     box.innerHTML = Glyphs.draw(st.id, ABILITIES[GLYPH_SAMPLE].cells(0, 0), bgOf(GLYPH_SAMPLE));
     const name = document.createElement('span');
     name.textContent = st.name;
@@ -1602,7 +1606,7 @@ function fillPicker() {
     b.title = ab.name;
     b.setAttribute('aria-label', ab.name);
     b.style.background = bgOf(k);
-    b.style.color = INK;
+    b.style.color = inkOf(k);
     b.innerHTML = iconSvg(k);
     pickerEl.append(b);
   });

@@ -369,12 +369,23 @@ function glyphStyles() {
 
   const byId = (id) => STYLES.find((s) => s.id === id) || STYLES[0];
 
+  // 何も起きないマスは、まわりのマスを表す薄い点だけを置く。
+  // 動くマスも、動きの線も、自分の輪も無い ── 何も起きないことがそのまま絵になる。
+  // どの描き方でも同じ。描き方ごとの語彙（矢印・升目・多角形）はどれも「動き」を
+  // 言うためのもので、動きが無いここでは出番がない。
+  function drawBlank() {
+    const parts = [];
+    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+      if (dx === 0 && dy === 0) continue;
+      parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.4" fill="currentColor" stroke="none" opacity=".45"/>`);
+    }
+    return svg(parts.join(''));
+  }
+
   // cycles は ABILITIES[k].cells(0, 0)、bg はそのタイルの地の色。
-  // 何も起きないマスは、どの描き方でも絵柄を持たない。
-  // 「押しても何も起きない」を、描かないことで示す（暗い地の色がその合図）。
   const draw = (styleId, cycles, bg) => {
     const a = read(cycles);
-    return a.fam === 'none' ? svg('') : byId(styleId).draw(a, bg);
+    return a.fam === 'none' ? drawBlank() : byId(styleId).draw(a, bg);
   };
 
   return { STYLES, DEFAULT, draw, byId, has: (id) => STYLES.some((s) => s.id === id) };
