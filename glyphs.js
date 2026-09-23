@@ -100,11 +100,7 @@ function glyphStyles() {
   };
 
   function drawDots(a) {
-    const parts = [];
-    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
-      if (dx === 0 && dy === 0) continue;
-      parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.1" fill="currentColor" stroke="none" opacity=".2"/>`);
-    }
+    const parts = [DOT_BACK];
     // またぐ対は決め打ちの形、またがない対は 2 マスを直に結ぶ
     if (a.fam === 'half' && !a.anti) {
       for (const [p, q] of a.pairs) {
@@ -116,7 +112,7 @@ function glyphStyles() {
     for (const [dx, dy] of a.cells) {
       parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="2.2" fill="currentColor" stroke="none"/>`);
     }
-    parts.push('<circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"/>');
+    parts.push(DOT_SELF);
     return svg(parts.join(''));
   }
 
@@ -142,7 +138,7 @@ function glyphStyles() {
           '<path d="M6.4 12 H9.2 M14.8 12 H17.6" stroke-width="1.9" stroke-linecap="round"/>'
           + head(4.2, 12, 180, 3.4) + head(19.8, 12, 0, 3.4)));
       }
-      parts.push('<circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>');
+      parts.push(SIGN_SELF);
     } else {
       // またがない対。2 マスのあいだを両向きの矢印で結ぶ
       for (const [p, q] of a.pairs) {
@@ -151,7 +147,7 @@ function glyphStyles() {
         parts.push(head(b.A[0], b.A[1], b.angA, 3.4));
         parts.push(head(b.B[0], b.B[1], b.angB, 3.4));
       }
-      parts.push('<circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>');
+      parts.push(SIGN_SELF);
     }
     return svg(parts.join(''));
   }
@@ -161,17 +157,16 @@ function glyphStyles() {
      動くマスは塗り、その中に行き先を指す三角を地の色で抜く。自分は枠だけ。
      ========================================================= */
   function drawGrid(a, bg) {
-    const s = 5.1, r = 1.2;
-    const sq = (dx, dy, attr) =>
-      `<rect x="${n2(P(dx) - s / 2)}" y="${n2(P(dy) - s / 2)}" width="${s}" height="${s}" rx="${r}" ${attr}/>`;
+    const s = GRID_S;
+    const sq = gridSq;
     const hit = new Set(a.cells.map(([x, y]) => `${x},${y}`));
     const parts = [];
     for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
       if (dx === 0 && dy === 0) continue;
-      if (!hit.has(`${dx},${dy}`)) parts.push(sq(dx, dy, 'fill="none" stroke="currentColor" stroke-width=".85" opacity=".16"'));
+      if (!hit.has(`${dx},${dy}`)) parts.push(sq(dx, dy, GRID_FAINT));
     }
     for (const [dx, dy] of a.cells) parts.push(sq(dx, dy, 'fill="currentColor" stroke="none" opacity=".95"'));
-    parts.push(sq(0, 0, 'fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"'));
+    parts.push(GRID_SELF);
     a.cells.forEach(([dx, dy], i) => {
       const [ex, ey] = a.dest[i];
       const u = rad(ang([ex - dx, ey - dy]));
@@ -209,7 +204,7 @@ function glyphStyles() {
       // またがない対。中心から腕を伸ばすと「斜め 4 マス」と同じ形になってしまうので、
       // 2 マスのあいだを棒で結んで、どことどこが入れ替わるかを示す。
       for (const [p, q] of a.pairs) parts.push(barOf(p, q));
-      parts.push('<circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".9"/>');
+      parts.push(SOLID_SELF);
       return svg(parts.join(''));
     }
     for (const [dx, dy] of a.cells) {
@@ -223,7 +218,7 @@ function glyphStyles() {
       }
     }
     if (a.fam !== 'rot') {
-      parts.push('<circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".9"/>');
+      parts.push(SOLID_SELF);
     }
     return svg(parts.join(''));
   }
@@ -235,10 +230,7 @@ function glyphStyles() {
      ========================================================= */
   function drawWire(a) {
     const parts = [];
-    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
-      if (dx === 0 && dy === 0) continue;
-      parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r=".9" fill="currentColor" stroke="none" opacity=".18"/>`);
-    }
+    parts.push(WIRE_BACK);
 
     if (a.fam === 'rot') {
       const d = a.cells.map(([x, y], i) => `${i ? 'L' : 'M'}${P(x)} ${P(y)}`).join(' ') + ' Z';
@@ -291,7 +283,9 @@ function glyphStyles() {
       });
     }
 
-    parts.push(`<circle cx="12" cy="12" r="${a.fam === 'swap' ? 1.9 : 2.3}" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".9"/>`);
+    parts.push(a.fam === 'swap'
+      ? '<circle cx="12" cy="12" r="1.9" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".9"/>'
+      : WIRE_SELF);
     return svg(parts.join(''));
   }
 
@@ -369,39 +363,45 @@ function glyphStyles() {
 
   const byId = (id) => STYLES.find((s) => s.id === id) || STYLES[0];
 
+  // ---- 13 種に共通して出るもの ----
+  // 中央の輪（＝押したマス自身。いつも動かない）と、描き方によっては下地のマス。
+  // この 2 つはどの能力でも同じ形で出る。変わるのは「動くマス」と「動きの印」だけ。
+  // 能力を持たないマスは、その変わる部分が何も無いので、共通部分だけを描く。
+  // 同じ文字列を両方から使うので、片方だけずれることがない。
+  const lattice = (make) => {
+    const out = [];
+    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+      if (dx === 0 && dy === 0) continue;
+      out.push(make(dx, dy));
+    }
+    return out.join('');
+  };
+  const DOT_BACK = lattice((dx, dy) =>
+    `<circle cx="${P(dx)}" cy="${P(dy)}" r="1.1" fill="currentColor" stroke="none" opacity=".2"/>`);
+  const DOT_SELF = '<circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"/>';
+  const GRID_S = 5.1;
+  const gridSq = (dx, dy, attr) =>
+    `<rect x="${n2(P(dx) - GRID_S / 2)}" y="${n2(P(dy) - GRID_S / 2)}" width="${GRID_S}" height="${GRID_S}" rx="1.2" ${attr}/>`;
+  const GRID_FAINT = 'fill="none" stroke="currentColor" stroke-width=".85" opacity=".16"';
+  const GRID_SELF = gridSq(0, 0, 'fill="none" stroke="currentColor" stroke-width="1.5" opacity=".9"');
+  const WIRE_BACK = lattice((dx, dy) =>
+    `<circle cx="${P(dx)}" cy="${P(dy)}" r=".9" fill="currentColor" stroke="none" opacity=".18"/>`);
+  const WIRE_SELF = '<circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".9"/>';
+  const SIGN_SELF = '<circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>';
+  const SOLID_SELF = '<circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".9"/>';
+
   // 何も起きないマスの絵柄。
   // どの描き方でも考えは同じ ── その描き方が持つ「器」だけを薄く置き、
   // 印は何も付けない。動くマスも、動きの線も、自分の輪も無い。
   // 器そのものは描き方ごとに違うので、見た目もそれぞれの流儀になる。
-  const around = (make) => {
-    const parts = [];
-    for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
-      if (dx === 0 && dy === 0) continue;
-      parts.push(make(dx, dy));
-    }
-    return svg(parts.join(''));
-  };
-  const FAINT = ' opacity=".45"';
-
   const BLANK = {
-    // 点図: まわりのマスを表す薄い点だけ
-    dots: () => around((dx, dy) =>
-      `<circle cx="${P(dx)}" cy="${P(dy)}" r="1.4" fill="currentColor" stroke="none"${FAINT}/>`),
-    // 升目: 薄い枠だけ。塗られたマスが 1 つも無い
-    grid: () => around((dx, dy) =>
-      `<rect x="${n2(P(dx) - 2.55)}" y="${n2(P(dy) - 2.55)}" width="5.1" height="5.1" rx="1.2"`
-      + ` fill="none" stroke="currentColor" stroke-width=".9"${FAINT}/>`),
-    // 結線: 結ばれていない節。中空の丸だけを置く
-    wire: () => around((dx, dy) =>
-      `<circle cx="${P(dx)}" cy="${P(dy)}" r="1.7" fill="none" stroke="currentColor" stroke-width="1"${FAINT}/>`),
-    // 標識: 輻も矢じりも無い、空の文字盤
-    sign: () => svg('<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor"'
-      + ` stroke-width="1.9"${FAINT}/>`),
-    // 単形: 腕の無い形。塗りがひとつ残るだけ
-    solid: () => svg(`<circle cx="12" cy="12" r="4.6" fill="currentColor" stroke="none"${FAINT}/>`),
-    // 直線: 引く線が無い。いちばん小さい閉じた形だけが残る
-    line: () => svg('<rect x="9.7" y="9.7" width="4.6" height="4.6" fill="none" stroke="currentColor"'
-      + ` stroke-width="2" stroke-linejoin="round"${FAINT}/>`),
+    dots: () => svg(DOT_BACK + DOT_SELF),
+    grid: () => svg(lattice((dx, dy) => gridSq(dx, dy, GRID_FAINT)) + GRID_SELF),
+    wire: () => svg(WIRE_BACK + WIRE_SELF),
+    sign: () => svg(SIGN_SELF),
+    solid: () => svg(SOLID_SELF),
+    // 直線は下地も中央の輪も持たない。真ん中の点だけを置く。
+    line: () => svg('<circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none"/>'),
   };
 
   // cycles は ABILITIES[k].cells(0, 0)、bg はそのタイルの地の色。
