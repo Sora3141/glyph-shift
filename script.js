@@ -414,11 +414,32 @@ function blinkHint() {
   hintTimer = setTimeout(clearHint, HINT_BLINK_MS);
 }
 
+// 1 回押したら光るのは 1 か所きり。あとから別のマスへ飛ばさない。
+const HINT_SEARCHING = '手を探しています…';
+
+function hintAfterSolve() {
+  blinkHint();
+  // 探し終わっても光らせるものが無かったとき（その間に完成した等）、案内を戻す
+  if (logEl.textContent === HINT_SEARCHING) logEl.textContent = 'タイルをクリック';
+}
+
 function showHint() {
   if (autoSolving || locked || isSolved()) return;
   Sfx.hint();
-  blinkHint();                // まず今わかっている手をすぐ点滅させる
-  requestSolve(blinkHint);    // 探索が終わったら対象を更新する
+  if (hintPlan) {
+    // もう解けた手順がある。それをそのまま見せる。
+    // 計算し直しはこれまでどおり毎回やるが、受け取っても点滅は動かさない
+    // （光らせる場所は押した時点で決める。あとから別のマスへ飛ばさない）。
+    blinkHint();
+    requestSolve(null);
+    return;
+  }
+  // まだ手順が無い。ここで保険の手順（シャッフルの逆再生）を見せると
+  // 数千手の遠回りの 1 手目を指すことになり、探索が終わった途端に
+  // 別のマスへ飛ぶ。見せずに、探し終わってから一度だけ光らせる。
+  clearHint();
+  logEl.textContent = HINT_SEARCHING;
+  requestSolve(hintAfterSolve);
 }
 
 // ---- 説明パネル ----
