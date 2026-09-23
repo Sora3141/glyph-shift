@@ -68,9 +68,24 @@ const ABILITIES = [
   { id: 'diagHalf', color: 'hsl(215 43% 55%)', name: '斜めの対角どうしを同時に入れ替え',
     cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x + 1, y - 1], [x - 1, y + 1]]] },
 
+  // 斜め 4 マス（四角の 4 すみ）の、上下どうし・左右どうし。
+  // 「斜めの対角どうし」と合わせて、4 すみの入れ替え 3 通りが揃う。
+  { id: 'sqUD', color: 'hsl(354 68% 64%)', name: '四角のすみを上下で入れ替え',
+    cells: (x, y) => [[[x - 1, y - 1], [x - 1, y + 1]], [[x + 1, y - 1], [x + 1, y + 1]]] },
+
+  { id: 'sqLR', color: 'hsl(300 68% 58%)', name: '四角のすみを左右で入れ替え',
+    cells: (x, y) => [[[x - 1, y - 1], [x + 1, y - 1]], [[x - 1, y + 1], [x + 1, y + 1]]] },
+
   { id: 'ringHalf', color: 'hsl(315 40% 57%)', name: '周囲 8 マスを向かいどうしで入れ替え',
     cells: (x, y) => [[[x - 1, y - 1], [x + 1, y + 1]], [[x, y - 1], [x, y + 1]],
                       [[x + 1, y - 1], [x - 1, y + 1]], [[x + 1, y], [x - 1, y]]] },
+
+  // 何も起きないマス。押しても動かないが、まわりのマスからは動かされる。
+  // 色だけは持つので、目標の柄の一色として数えられる。
+  // 絵柄を描かないぶんインクとのコントラストが要らないので、
+  // 他の 12 色から遠い暗い無彩色を当てられる（盤の窪みとも見分けがつく明るさ）。
+  { id: 'none', color: 'hsl(240 8% 30%)', name: '何も起きない',
+    cells: () => [] },
 
 ];
 
@@ -79,6 +94,7 @@ const FAMILIES = [
   { key: 'swap', label: '入れ替え' },
   { key: 'rot',  label: '回転' },
   { key: 'half', label: '半回転' },
+  { key: 'none', label: '能力なし' },
 ];
 
 const INFO = {
@@ -91,10 +107,14 @@ const INFO = {
   ringCW: { fam: 'rot', text: '自分を囲む 8 マス全部を時計回りに 1 つずつ送る。一度に動く数が最も多い。盤の内側でしか使えない。' },
   crossHalf: { fam: 'half', text: '上と下、右と左を同時に入れ替える。上下左右を時計回りに 2 回送ったのと同じ動き。4 方向すべてが盤内である必要がある。' },
   diagHalf: { fam: 'half', text: '左上と右下、右上と左下を同時に入れ替える。斜め 4 マスを時計回りに 2 回送ったのと同じ動き。斜め 4 方向すべてが盤内である必要がある。' },
+  sqUD: { fam: 'half', text: '斜め 4 マス（四角の 4 すみ）を、上下どうしで入れ替える。左上と左下、右上と右下。斜め 4 方向すべてが盤内である必要がある。' },
+  sqLR: { fam: 'half', text: '斜め 4 マス（四角の 4 すみ）を、左右どうしで入れ替える。左上と右上、左下と右下。斜め 4 方向すべてが盤内である必要がある。' },
+  none: { fam: 'none', text: '押しても何も起きない。まわりのマスから動かされるだけ。盤のどこにあっても使えない。' },
   ringHalf: { fam: 'half', text: '自分を囲む 8 マスを、向かい合うものどうしで一斉に入れ替える。周囲 8 マスを時計回りに 4 回送ったのと同じ動き。盤の内側でしか使えない。' },
 };
 
-// 能力が使えるなら影響するマスのサイクルを、使えないなら null を返す
+// 能力が使えるなら影響するマスのサイクルを、使えないなら null を返す。
+// 動かすマスが 1 つも無い能力（何も起きないマス）も、押せないものとして null を返す。
 function cyclesOf(abIndex, x, y) {
   const self = idx(x, y);
   const out = [];
@@ -108,7 +128,7 @@ function cyclesOf(abIndex, x, y) {
     }
     out.push(mapped);
   }
-  return out;
+  return out.length ? out : null;
 }
 
 // ---- アイコン描画 ----
@@ -126,12 +146,14 @@ try {
 const iconSvg = (abIndex) => Glyphs.draw(glyphStyle, ABILITIES[abIndex].cells(0, 0), bgOf(abIndex));
 
 // 色は能力に固定せず、盤面ごとに割り当てる。
-// 能力が 10 種あるので固定の色相だと近い色が同居しうるが、柄合わせでは
+// 能力が 12 種あるので固定の色相だと近い色が同居しうるが、柄合わせでは
 // 色の見分けやすさが最優先なので、使う分だけ等間隔に配る。
 // UI のアクセント（菫色）と紛れないよう、その帯は飛ばす。
 // 色は能力ごとに固定する。長く遊ぶと色でブロックを覚えられるようにするため。
-// 10 種あるので色相だけでは詰まる。色相は保ったまま彩度と明度を探索で調整し、
-// いちばん近い 2 色の知覚的な差（CIELAB の ΔE）を 37 まで広げてある。
+// 12 種あるので色相だけでは詰まる。色相は保ったまま彩度と明度を探索で調整し、
+// いちばん近い 2 色の知覚的な差（CIELAB の ΔE）を 35 まで広げてある。
+// 「四角のすみ」2 種を足すときは、色で覚えている人のために既存 10 色を動かさず、
+// 残りの空きから 2 色だけを探した。
 // 彩度は 72% までに抑えて、画面が毒々しくならないようにしている。
 // UI のアクセントと紛れる菫色の帯（248〜292°）は使っていない。
 const bgOf = (abIndex) => ABILITIES[abIndex].color;
@@ -233,7 +255,7 @@ function candidatePatterns(w, h, k) {
 
 // 選べる盤のサイズとブロック数
 const SIZES = [3, 4, 5, 6, 7, 8, 9, 10];
-const TYPE_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+const TYPE_COUNTS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
 
 // そのサイズで、そのブロック数の柄が作れるか
 const typeAvailable = (w, h, k) => k <= ABILITIES.length && k <= w * h && candidatePatterns(w, h, k).length > 0;
@@ -343,12 +365,25 @@ function placeTiles() {
 }
 
 // 端に寄っていて能力を使えないタイルを暗くする
+// もともと能力を持たないマスか（置き場所によらず、いつでも押せない）
+const isBlank = (ab) => !ABILITIES[ab].cells(0, 0).length;
+
 function markUsable() {
   let usable = 0;
   for (let i = 0; i < SIZE; i++) {
     const t = tiles[board[i]];
-    if (cyclesAt(i)) { t.classList.remove('off'); t.title = ABILITIES[abilityAt(i)].name; usable++; }
-    else { t.classList.add('off'); t.title = `${ABILITIES[abilityAt(i)].name}（この位置では盤の外に出るので使えない）`; }
+    const ab = abilityAt(i);
+    if (cyclesAt(i)) { t.classList.remove('off', 'blank'); t.title = ABILITIES[ab].name; usable++; }
+    else if (isBlank(ab)) {
+      // 能力そのものが無いマス。位置のせいではないので、暗くする印は付けない
+      t.classList.remove('off');
+      t.classList.add('blank');
+      t.title = ABILITIES[ab].name;
+    } else {
+      t.classList.remove('blank');
+      t.classList.add('off');
+      t.title = `${ABILITIES[ab].name}（この位置では盤の外に出るので使えない）`;
+    }
   }
   return usable;
 }
@@ -444,6 +479,7 @@ function showHint() {
 
 // ---- 説明パネル ----
 function renderPanel() {
+  document.getElementById('blockTotal').textContent = `全 ${ABILITIES.length} 種`;
   const body = document.getElementById('panelBody');
   const used = new Set(tileAbility);
   body.replaceChildren();
@@ -788,7 +824,9 @@ function fire(i, dir = 1) {
   if (!cyclesAt(i)) {
     shakeTile(i);
     Sfx.blocked();
-    logEl.textContent = '盤の外に出てしまうので、この位置では使えない';
+    logEl.textContent = isBlank(abilityAt(i))
+      ? 'このマスには能力がない。まわりのマスから動かすしかない'
+      : '盤の外に出てしまうので、この位置では使えない';
     return;
   }
   const ab = abilityAt(i);   // 使ったタイルは動かないので、前後で変わらない
@@ -1086,6 +1124,9 @@ function nthMove(b, tbl, d) {
 // 定常分布はちょうど一様＝エントロピー最大になる。
 function mixBoard(b, tbl, steps, rng, rec) {
   let deg = degreeOf(b, tbl);
+  // どのマスも押せない組み合わせ（能力なしが多い盤など）。混ざらないので何もしない。
+  // 呼び出し側は「混ぜたのに完成のまま」を見て引き直す。
+  if (!deg) return;
   for (let t = 0; t < steps; t++) {
     const [i, dir] = nthMove(b, tbl, Math.floor(rng() * deg));
     const cyc = tbl.cyc[tileAbility[b[i]]][i];
@@ -1167,7 +1208,11 @@ function newPuzzle(useSeed) {
         [picked[k], picked[j]] = [picked[j], picked[k]];
       }
     } else {
-      const pool = ABILITIES.map((_, k) => k);
+      // 「何も起きない」は柄の一色ぶん、つまり盤の 1/K を占める。色数が少ないと
+      // 盤の半分近くが動かないマスになり、打てる手が数えるほどしか残らない。
+      // ランダムに選ぶときは色数が 4 以上のときだけ混ぜる（カスタムでの指定は尊重する）。
+      const pool = ABILITIES.map((_, k) => k)
+        .filter((k) => K >= 4 || !isBlank(k));
       for (let k = pool.length - 1; k > 0; k--) {
         const j = Math.floor(rng() * (k + 1));
         [pool[k], pool[j]] = [pool[j], pool[k]];

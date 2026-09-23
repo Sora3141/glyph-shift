@@ -36,11 +36,34 @@ function glyphStyles() {
     for (const c of cycles) c.forEach((_, i) => dest.push(c[(i + 1) % c.length]));
     const diag = ([x, y]) => x !== 0 && y !== 0;
     const reps = cycles.map((c) => c[0]);   // 各対の代表。軸の向きと長さはここから取る
+    // 対が自分をまたいで向かい合っているか。「上下と左右を同時に入れ替え」の類は
+    // またぐが、「四角の 4 すみの上と下」のように片側どうしで組む能力はまたがない。
+    // またがない対は中心を通る線では描けないので、2 マスを直に結ぶ。
+    const anti = cycles.every((c) => c.length === 2
+      && c[1][0] === -c[0][0] && c[1][1] === -c[0][1]);
     return {
-      cells, dest, reps,
+      cells, dest, reps, anti,
+      pairs: cycles.filter((c) => c.length === 2).map((c) => [c[0], c[1]]),
       axes: reps.map(ang),
-      fam: cycles.length > 1 ? 'half' : cycles[0].length === 2 ? 'swap' : 'rot',
+      fam: !cycles.length ? 'none'
+        : cycles.length > 1 ? 'half' : cycles[0].length === 2 ? 'swap' : 'rot',
       allDiag: cells.every(diag),
+    };
+  }
+
+  // 対の 2 マスを直に結ぶ弧。中心から遠ざかる側へ膨らませて、
+  // あいだにある別のマス（下地の点）を通らないようにする。
+  // 戻り値は d 属性と、両端での進む向き（矢じりを置くため）。
+  function bowOf(p, q, h = 4.4) {
+    const A = [P(p[0]), P(p[1])], B = [P(q[0]), P(q[1])];
+    const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+    const d = Math.hypot(mx - 12, my - 12) || 1;
+    const C = [mx + ((mx - 12) / d) * h, my + ((my - 12) / d) * h];
+    return {
+      d: `M${A[0]} ${A[1]} Q${n2(C[0])} ${n2(C[1])} ${B[0]} ${B[1]}`,
+      A, B, C,
+      angA: ang([A[0] - C[0], A[1] - C[1]]),   // A 側の端で外を向く向き
+      angB: ang([B[0] - C[0], B[1] - C[1]]),
     };
   }
 
@@ -82,7 +105,14 @@ function glyphStyles() {
       if (dx === 0 && dy === 0) continue;
       parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.1" fill="currentColor" stroke="none" opacity=".2"/>`);
     }
-    parts.push(MOTION[motionOf(a)]);   // 弧や矢印は点の下に敷く
+    // またぐ対は決め打ちの形、またがない対は 2 マスを直に結ぶ
+    if (a.fam === 'half' && !a.anti) {
+      for (const [p, q] of a.pairs) {
+        parts.push(`<path d="${bowOf(p, q).d}" stroke-width="1.5" opacity=".8"/>`);
+      }
+    } else {
+      parts.push(MOTION[motionOf(a)]);   // 弧や矢印は点の下に敷く
+    }
     for (const [dx, dy] of a.cells) {
       parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="2.2" fill="currentColor" stroke="none"/>`);
     }
@@ -105,12 +135,21 @@ function glyphStyles() {
       parts.push('<path d="M12 2.6 A9.4 9.4 0 1 1 2.6 12" stroke-width="1.7" stroke-linecap="round" opacity=".9"/>');
       parts.push(head(2.6, 11.9, 270, 3.6));   // 時計回りなので、西の端では上を向く
       parts.push('<circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/>');
-    } else {
+    } else if (a.anti) {
       for (const ax of a.axes) {
         // 中央の輪を避けて左右に分けた両向き矢印
         parts.push(rot(ax,
           '<path d="M6.4 12 H9.2 M14.8 12 H17.6" stroke-width="1.9" stroke-linecap="round"/>'
           + head(4.2, 12, 180, 3.4) + head(19.8, 12, 0, 3.4)));
+      }
+      parts.push('<circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>');
+    } else {
+      // またがない対。2 マスのあいだを両向きの矢印で結ぶ
+      for (const [p, q] of a.pairs) {
+        const b = bowOf(p, q, 3.4);
+        parts.push(`<path d="${b.d}" stroke-width="1.9" stroke-linecap="round"/>`);
+        parts.push(head(b.A[0], b.A[1], b.angA, 3.4));
+        parts.push(head(b.B[0], b.B[1], b.angB, 3.4));
       }
       parts.push('<circle cx="12" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>');
     }
@@ -154,8 +193,25 @@ function glyphStyles() {
   const ARM = '<rect x="13.9" y="9.9" width="4.8" height="4.2" rx="1.3" fill="currentColor" stroke="none"/>';
   const PETAL = '<path d="M12.9 14.6 Q9.4 7.0 15.6 4.3 Q18.4 9.9 12.9 14.6 Z" fill="currentColor" stroke="none"/>';
 
+  // 2 マスを結ぶ太い棒（単形のためのもの）
+  function barOf(p, q, t = 4.2) {
+    const A = [P(p[0]), P(p[1])], B = [P(q[0]), P(q[1])];
+    const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    const mx = (A[0] + B[0]) / 2, my = (A[1] + B[1]) / 2;
+    return `<g transform="rotate(${n2(ang([B[0] - A[0], B[1] - A[1]]))} ${n2(mx)} ${n2(my)})">`
+      + `<rect x="${n2(mx - len / 2 - t / 2)}" y="${n2(my - t / 2)}" width="${n2(len + t)}" height="${t}"`
+      + ` rx="${t / 2}" fill="currentColor" stroke="none"/></g>`;
+  }
+
   function drawSolid(a) {
     const parts = [];
+    if (a.fam === 'half' && !a.anti) {
+      // またがない対。中心から腕を伸ばすと「斜め 4 マス」と同じ形になってしまうので、
+      // 2 マスのあいだを棒で結んで、どことどこが入れ替わるかを示す。
+      for (const [p, q] of a.pairs) parts.push(barOf(p, q));
+      parts.push('<circle cx="12" cy="12" r="2.3" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".9"/>');
+      return svg(parts.join(''));
+    }
     for (const [dx, dy] of a.cells) {
       const k = Math.hypot(dx, dy);                 // 1 か √2
       if (a.fam === 'rot') {
@@ -212,6 +268,15 @@ function glyphStyles() {
       }
       for (const [dx, dy] of a.cells) parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.8" fill="currentColor" stroke="none"/>`);
 
+    } else if (!a.anti) {
+      // またがない対。2 マスを弧で結び、両端に矢じりを置く
+      for (const [p, q] of a.pairs) {
+        const b = bowOf(p, q, 3.8);
+        parts.push(`<path d="${b.d}" stroke-width="1.4" opacity=".85"/>`);
+        parts.push(head(b.A[0], b.A[1], b.angA, 2.6));
+        parts.push(head(b.B[0], b.B[1], b.angB, 2.6));
+      }
+      for (const [dx, dy] of a.cells) parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.5" fill="currentColor" stroke="none"/>`);
     } else {
       // 矢じりが行き先のマスに着地する
       a.reps.forEach((rep, i) => {
@@ -247,11 +312,13 @@ function glyphStyles() {
       }).join(' ') + ' Z';
       return svg(`<path d="${d}" ${attr}/>`);
     }
-    const L = 7.6;
-    const d = a.axes.map((ax) => {
-      const u = rad(ax), cx = Math.cos(u) * L, cy = Math.sin(u) * L;
-      return `M${n2(12 - cx)} ${n2(12 - cy)} L${n2(12 + cx)} ${n2(12 + cy)}`;
-    }).join(' ');
+    // またがない対は中心を通らない。2 マスを直に結ぶ。
+    const d = a.anti
+      ? a.axes.map((ax) => {
+        const u = rad(ax), L = 7.6, cx = Math.cos(u) * L, cy = Math.sin(u) * L;
+        return `M${n2(12 - cx)} ${n2(12 - cy)} L${n2(12 + cx)} ${n2(12 + cy)}`;
+      }).join(' ')
+      : a.pairs.map(([p, q]) => `M${P(p[0])} ${P(p[1])} L${P(q[0])} ${P(q[1])}`).join(' ');
     return svg(`<path d="${d}" ${attr}/>`);
   }
 
@@ -303,7 +370,12 @@ function glyphStyles() {
   const byId = (id) => STYLES.find((s) => s.id === id) || STYLES[0];
 
   // cycles は ABILITIES[k].cells(0, 0)、bg はそのタイルの地の色。
-  const draw = (styleId, cycles, bg) => byId(styleId).draw(read(cycles), bg);
+  // 何も起きないマスは、どの描き方でも絵柄を持たない。
+  // 「押しても何も起きない」を、描かないことで示す（暗い地の色がその合図）。
+  const draw = (styleId, cycles, bg) => {
+    const a = read(cycles);
+    return a.fam === 'none' ? svg('') : byId(styleId).draw(a, bg);
+  };
 
   return { STYLES, DEFAULT, draw, byId, has: (id) => STYLES.some((s) => s.id === id) };
 }

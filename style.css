@@ -184,6 +184,9 @@ body {
 .tile:active { filter: brightness(1.2); }
 .tile.off { cursor: not-allowed; }
 .tile.off:active { filter: none; }
+/* 能力を持たないマス。位置のせいではないので暗くはしない（地の色がもう暗い） */
+.tile.blank { cursor: not-allowed; }
+.tile.blank:active { filter: none; }
 
 /* 発動した合図 */
 .slot.fired::after {
