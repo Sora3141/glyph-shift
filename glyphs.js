@@ -369,23 +369,46 @@ function glyphStyles() {
 
   const byId = (id) => STYLES.find((s) => s.id === id) || STYLES[0];
 
-  // 何も起きないマスは、まわりのマスを表す薄い点だけを置く。
-  // 動くマスも、動きの線も、自分の輪も無い ── 何も起きないことがそのまま絵になる。
-  // どの描き方でも同じ。描き方ごとの語彙（矢印・升目・多角形）はどれも「動き」を
-  // 言うためのもので、動きが無いここでは出番がない。
-  function drawBlank() {
+  // 何も起きないマスの絵柄。
+  // どの描き方でも考えは同じ ── その描き方が持つ「器」だけを薄く置き、
+  // 印は何も付けない。動くマスも、動きの線も、自分の輪も無い。
+  // 器そのものは描き方ごとに違うので、見た目もそれぞれの流儀になる。
+  const around = (make) => {
     const parts = [];
     for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
       if (dx === 0 && dy === 0) continue;
-      parts.push(`<circle cx="${P(dx)}" cy="${P(dy)}" r="1.4" fill="currentColor" stroke="none" opacity=".45"/>`);
+      parts.push(make(dx, dy));
     }
     return svg(parts.join(''));
-  }
+  };
+  const FAINT = ' opacity=".45"';
+
+  const BLANK = {
+    // 点図: まわりのマスを表す薄い点だけ
+    dots: () => around((dx, dy) =>
+      `<circle cx="${P(dx)}" cy="${P(dy)}" r="1.4" fill="currentColor" stroke="none"${FAINT}/>`),
+    // 升目: 薄い枠だけ。塗られたマスが 1 つも無い
+    grid: () => around((dx, dy) =>
+      `<rect x="${n2(P(dx) - 2.55)}" y="${n2(P(dy) - 2.55)}" width="5.1" height="5.1" rx="1.2"`
+      + ` fill="none" stroke="currentColor" stroke-width=".9"${FAINT}/>`),
+    // 結線: 結ばれていない節。中空の丸だけを置く
+    wire: () => around((dx, dy) =>
+      `<circle cx="${P(dx)}" cy="${P(dy)}" r="1.7" fill="none" stroke="currentColor" stroke-width="1"${FAINT}/>`),
+    // 標識: 輻も矢じりも無い、空の文字盤
+    sign: () => svg('<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor"'
+      + ` stroke-width="1.9"${FAINT}/>`),
+    // 単形: 腕の無い形。塗りがひとつ残るだけ
+    solid: () => svg(`<circle cx="12" cy="12" r="4.6" fill="currentColor" stroke="none"${FAINT}/>`),
+    // 直線: 引く線が無い。いちばん小さい閉じた形だけが残る
+    line: () => svg('<rect x="9.7" y="9.7" width="4.6" height="4.6" fill="none" stroke="currentColor"'
+      + ` stroke-width="2" stroke-linejoin="round"${FAINT}/>`),
+  };
 
   // cycles は ABILITIES[k].cells(0, 0)、bg はそのタイルの地の色。
   const draw = (styleId, cycles, bg) => {
     const a = read(cycles);
-    return a.fam === 'none' ? drawBlank() : byId(styleId).draw(a, bg);
+    if (a.fam !== 'none') return byId(styleId).draw(a, bg);
+    return (BLANK[byId(styleId).id] || BLANK.dots)();
   };
 
   return { STYLES, DEFAULT, draw, byId, has: (id) => STYLES.some((s) => s.id === id) };
