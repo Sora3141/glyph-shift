@@ -788,14 +788,17 @@ function requestSolve(done, final = false, background = false, budget = 0) {
   const snap = solveSnapshot();
   solveStart = snap.start;
   if (worker) {
-    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: budget || hintBudgetWorker(), fallback: snap.fallback });
-    // 返事が来ないまま黙り込む環境（file:// で Blob の Worker が止められる等）への保険
+    const budgetMs = budget || hintBudgetWorker();
+    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: budgetMs, fallback: snap.fallback });
+    // 返事が来ないまま黙り込む環境（file:// で Blob の Worker が止められる等）への保険。
+    // 待つ時間は、そのとき渡した予算に合わせる。決め打ちにすると、長く探し直している
+    // 最中に打ち切って Worker を壊れた扱いにしてしまう（以後ぜんぶ同期処理に落ちる）。
     setTimeout(() => {
       if (!hintBusy || solveId !== id) return;
       if (worker) { worker.terminate(); worker = null; }
       workerBroken = true;
       fallbackToSync();
-    }, hintBudgetWorker() + 2000);
+    }, budgetMs + 2000);
   } else {
     // 同期処理なので、呼び出し側が先に画面を描けるよう一拍ずらす
     setTimeout(() => finishSolve(id, Solver.solvePuzzle(problem, snap.start, snap.goal, HINT_BUDGET_SYNC, snap.fallback)), 16);

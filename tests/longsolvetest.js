@@ -59,4 +59,27 @@ console.log('新しい盤にすると、また 1 回だけ探し直せる');
   console.log('  盤ごとに 1 回  OK');
 }
 
+console.log('保険のタイマーは、そのとき渡した予算に合わせる');
+{
+  // 決め打ちだと、長く探し直している最中に打ち切って Worker を壊れた扱いにしてしまう。
+  const delays = [];
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn, ms) => { delays.push(ms); return realSetTimeout(fn, ms); };
+  arm(4);
+  requestSolve(null, false);
+  const shortDelays = delays.filter((d) => d >= 1000);
+  ok(shortDelays.some((d) => d === hintBudgetWorker() + 2000),
+    `ふつうの依頼の見張りが ${shortDelays}（期待 ${hintBudgetWorker() + 2000}）`);
+
+  delays.length = 0;
+  finishSolve(sent[0].id, { plan: Solver.runsToPlan(solution), optimal: false, method: 'reverse', ms: 10 }, false);
+  const longDelays = delays.filter((d) => d >= 1000);
+  ok(longDelays.some((d) => d === HINT_BUDGET_LONG + 2000),
+    `探し直しの見張りが ${longDelays}（期待 ${HINT_BUDGET_LONG + 2000}）`);
+  ok(!longDelays.some((d) => d < HINT_BUDGET_LONG),
+    `探し直しより短い見張りがある: ${longDelays}`);
+  globalThis.setTimeout = realSetTimeout;
+  console.log(`  ふつう ${hintBudgetWorker() + 2000}ms / 探し直し ${HINT_BUDGET_LONG + 2000}ms  OK`);
+}
+
 console.log(fail === 0 ? '\n裏での探し直し: 全チェック通過' : `\n失敗 ${fail} 件`);
