@@ -69,15 +69,16 @@ for (const f of files) {
 }
 // Service Worker のテストだけは、キャッシュの振る舞いを見るために自分で場所を作る。
 // ここの DOM の代わり物とは前提が違うので、別のプロセスとして走らせる。
-let swOk = true;
+let swRan = false;
 if (!pick.length || pick.some((p) => 'swunit'.includes(p))) {
+  swRan = true;
   const r = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'swunit.js')], { encoding: 'utf8' });
-  swOk = r.status === 0 && !/失敗\s*\d+\s*件/.test(r.stdout || '');
+  const swOk = r.status === 0 && !/失敗\s*\d+\s*件/.test(r.stdout || '');
   console.log(`${swOk ? '  通過' : '★ 失敗'}  swunit.js`);
   if (!swOk) { bad.push('swunit.js'); console.log((r.stdout || '').split('\n').filter((l) => /FAIL|失敗/.test(l)).slice(0, 4).map((l) => '        ' + l.trim()).join('\n')); }
   else passed++;
 }
 
-const total = files.length + (swOk || bad.includes('swunit.js') ? 1 : 0);
+const total = files.length + (swRan ? 1 : 0);
 console.log(`\n${total} 本中 通過 ${passed} / 失敗 ${bad.length}`);
 if (bad.length) { console.log('失敗: ' + bad.join(' ')); process.exit(1); }

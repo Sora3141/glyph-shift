@@ -546,6 +546,9 @@ function solverModule() {
 
   const ENDGAME_CELLS = 9; // 最後にまとめて揃えるマス数（下 3 行 × 3 列）
   const HOLE_TRIES = 3;    // パイプラインが実際に積み上げに使う穴の数（pickHole の打ち切りと対）
+  const REPAIR_MAX_WRONG = 6;   // 崩して直しにいく、合わないマスの数の上限
+  const REPAIR_STEPS = 40;      // 欠けを歩かせる歩数の上限
+  const REPAIR_BAND = 1;        // 帯の太さ（線分から何マスまで開放するか）
 
   // 最後に残す 3×3 の穴の位置を選ぶ。
   // 穴のまわりの確定マスの能力は目標の柄で決まっているので、
@@ -1723,6 +1726,93 @@ function solverModule() {
       fixed[t] = 1;
       left--;
     }
+    // 終盤で少しだけ合わないまま止まったとき、確定マスを一時的に崩して直す。
+    //
+    // よく起きるのは「離れた 2 マスが互いの絵柄を持っている」形。これは奇置換 1 つぶんで、
+    // 確定マスに触らないかぎり作れないことがある（マクロが作るのは主に 3 サイクル＝偶置換）。
+    // 絵柄は互換なので、同じ絵柄を持つ確定マスを経由すれば 3 サイクルで直せる。
+    //
+    // そこで「欠け」を歩かせる。a は X が要るのに Y を持ち、b は Y が要るのに X を持つとする。
+    // X を持つ確定マス c をひとつだけ開放して a に X を入れると、a は合い、代わりに c が欠ける。
+    // 盤にある絵柄の枚数は手を打っても変わらないので、欠けは消えずに移るだけ。
+    // c を b に近いものから選べば、欠けは b に向かって歩いていき、b の近くまで来れば
+    // 終盤の局所探索で閉じられる。盤全体を運ぶ長い手順を探さずに済む。
+    //
+    // 途中で行き詰まったら、崩す前の盤面と手順にすべて戻す。
+    const wrongCells = () => {
+      const out = [];
+      for (let i = 0; i < P.SIZE; i++) if (lay[i] !== goal[i]) out.push(i);
+      return out;
+    };
+    const repair = () => {
+      let wrong = wrongCells();
+      if (!wrong.length) return true;
+      if (wrong.length > REPAIR_MAX_WRONG || B.timeUp()) return false;
+      const mark = plan.length;
+      const fixed0 = Uint8Array.from(fixed);
+      const restore = () => { B.undoTo(mark); fixed.set(fixed0); };
+      let widen = 0, lastSig = '';
+
+      for (let step = 0; step < REPAIR_STEPS; step++) {
+        if (B.timeUp()) { restore(); return false; }
+        wrong = wrongCells();
+        if (!wrong.length) { left = 0; return true; }
+        if (wrong.length > REPAIR_MAX_WRONG) { restore(); return false; }
+
+        // まず、欠けているマスだけを未確定にして、そのまま閉じられるか試す
+        const mark2 = plan.length;
+        const save = Uint8Array.from(fixed);
+        for (const i of wrong) fixed[i] = 0;
+        if (finishIfNear() || endgame(B, 200000)) { left = 0; fixed.set(save); for (const i of wrong) fixed[i] = 1; return true; }
+        B.undoTo(mark2);
+        fixed.set(save);
+
+        // 合わない 2 マス a・b を結ぶ「帯」（線分から距離 1 以内）の確定マスを開放し、
+        // a の側から順に置き直す。置けずに残るマスは b のまわりに固まるので、
+        // 終盤の局所探索が届く。絵柄で選んで散らばらせると、最後の数マスが
+        // 離れてしまって閉じられない（それで直らないことを実測した）。
+        const a0 = wrong[0];
+        const b0 = wrong.find((i) => i !== a0 && lay[i] === goal[a0]) ?? wrong[1];
+        if (b0 === undefined) { restore(); return false; }
+        // 近づいたら帯を太くする。遠いうちは細い帯で寄せ、近くまで来たら
+        // 局所探索が働けるだけの広さを与える（細いままだと同じ形で足踏みする）。
+        // 太くしても変わらないときは、盤の中央へ向けて帯を張る。隅や縁は使える能力が
+        // 少なくて閉じられないことがあり、いったん内側へ寄せると直せる。
+        const mid = ((G.H - 1) >> 1) * G.W + ((G.W - 1) >> 1);
+        const tgt = widen >= 2 && G.cheb(a0, mid) > 1 ? mid : b0;
+        const n = Math.max(1, G.cheb(a0, tgt));
+        const bandR = Math.min(REPAIR_BAND + widen, n <= 4 ? 3 : 1);
+        const band = new Set();
+        for (let t = 0; t <= n; t++) {
+          const x = Math.round(G.cx[a0] + (G.cx[tgt] - G.cx[a0]) * t / n);
+          const y = Math.round(G.cy[a0] + (G.cy[tgt] - G.cy[a0]) * t / n);
+          for (let dy = -bandR; dy <= bandR; dy++) for (let dx = -bandR; dx <= bandR; dx++) {
+            if (G.inBoard(x + dx, y + dy)) band.add(G.at(x + dx, y + dy));
+          }
+        }
+        for (const i of band) fixed[i] = 0;
+        // b0 から遠いものを先に置く（最後に残るマスが b0 のまわりに集まるように）
+        const todo = [...band].filter((i) => lay[i] !== goal[i] || !fixed[i]);
+        todo.sort((x, y) => G.cheb(y, tgt) - G.cheb(x, tgt));
+        for (const t of todo) {
+          if (B.timeUp()) { restore(); return false; }
+          if (lay[t] === goal[t] || place(B, t, goal[t], 0)) fixed[t] = 1;
+        }
+        const after = wrongCells();
+        trace.push({ t: a0, what: 'band', 帯: band.size, 太さ: bandR, 向き: tgt === b0 ? '相手' : '中央', 残り: after.length });
+        // 形がまったく変わらなければ、次は帯を太くする。それでも変わらなければ諦める。
+        const sig = after.join(',');
+        if (sig === lastSig) { if (++widen > 3) { restore(); return false; } } else widen = 0;
+        lastSig = sig;
+        if (!after.length) { left = 0; return true; }
+        for (const i of after) fixed[i] = 0;
+        if (finishIfNear() || endgame(B, 400000)) { left = 0; for (const i of after) fixed[i] = 1; return true; }
+        for (const i of after) fixed[i] = 1;
+      }
+      restore();
+      return false;
+    };
+
     for (const t of deferred) {
       if (B.timeUp()) return result(false);
       if (lay[t] === goal[t] || place(B, t, goal[t], 0)) { fixed[t] = 1; left--; }
@@ -1731,6 +1821,7 @@ function solverModule() {
     let ok = tryEnd(400000);
     trace.push({ t: -1, what: 'end', left, ok, ms: Math.round(performance.now() - t0) });
     if (!ok && tryFrame(-1)) ok = true;
+    if (!ok) ok = repair();
     return result(ok);
   }
 

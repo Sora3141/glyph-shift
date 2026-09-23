@@ -681,11 +681,19 @@ let solveId = 0;        // 進行中の依頼の番号。盤面が変わった�
 let solveDones = [];    // 返事が来たら呼ぶもの
 let movesWhileSolving = []; // 計算中に打った手。返ってきた手順に追いつかせる
 let solveStart = null;      // 依頼したときの並び。返ってきた手順はここから始まる
+let longSolveTried = false; // 逆手順に落ちた盤で、裏での長い探し直しをもう試したか
 
 // Worker の中で長めに探索する。同期で動かすときは画面が固まるので短くする。
 // 大きい盤や色数の多い盤は難しいので、Worker では時間を足す（最大 7 秒）。
 const HINT_BUDGET_SYNC = 1200;
 const hintBudgetWorker = () => 3000 + (SIZE >= 49 ? 2500 : 0) + (types >= 6 ? 1500 : 0);
+// 逆手順しか出せなかった盤だけ、裏でこの時間まで探し直す。
+// 難しい盤は、終盤で確定マスを崩して直す手順にたどり着くまでに時間が要る。
+// 実測では、行き詰まっていた 4 盤が 45 秒で 2 盤、60 秒で 4 盤とも解けた
+// （1 万手超の逆手順が 275〜450 手になる）。ふつうの盤はここまで来ないので、
+// この時間を使うのは行き詰まった盤だけ。途中経過は届くので、よりよい手順が
+// 見つかった時点で差し替わる。
+const HINT_BUDGET_LONG = 60000;
 
 let worker = null;
 let workerBroken = false;   // この環境では Worker が使えないと分かったら、もう試さない
@@ -750,7 +758,17 @@ function finishSolve(id, res, partial = false) {
     for (const [i, dir, order] of movesWhileSolving) followPlan(plan, i, dir, order);
     if (!hintPlan || planCost(plan.runs) <= planCost(hintPlan.runs) || !partial) hintPlan = plan;
   }
-  if (!partial) { hintBusy = false; movesWhileSolving = []; }
+  if (!partial) {
+    hintBusy = false;
+    movesWhileSolving = [];
+    // 逆手順しか出せなかった盤は、そのままだと 1 万手を超える使えないヒントになる。
+    // いま出ている手順でも遊べるので、裏でもっと長く探し直す。途中でよりよい手順が
+    // 見つかれば差し替わる（見つからなければ、いまの手順のまま）。1 盤につき 1 回だけ。
+    if (res && res.method === 'reverse' && !longSolveTried && worker) {
+      longSolveTried = true;
+      requestSolve(null, false, true, HINT_BUDGET_LONG);
+    }
+  }
   // 待っている人には最初の返事で応える（ヒントの点滅には十分）。最終結果を待つものは残す。
   const dones = solveDones;
   solveDones = partial ? dones.filter((d) => d.final) : [];
@@ -758,7 +776,7 @@ function finishSolve(id, res, partial = false) {
 }
 
 // done は最初の返事（途中経過でもよい）で呼ぶ。final を付けると最終結果まで待つ。
-function requestSolve(done, final = false, background = false) {
+function requestSolve(done, final = false, background = false, budget = 0) {
   if (done) solveDones.push({ f: done, final });
   if (hintBusy) return;
   // Worker が無い環境では同期で解くことになる。先読みのためだけに
@@ -770,7 +788,7 @@ function requestSolve(done, final = false, background = false) {
   const snap = solveSnapshot();
   solveStart = snap.start;
   if (worker) {
-    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: hintBudgetWorker(), fallback: snap.fallback });
+    worker.postMessage({ type: 'solve', id, start: snap.start, goal: snap.goal, budget: budget || hintBudgetWorker(), fallback: snap.fallback });
     // 返事が来ないまま黙り込む環境（file:// で Blob の Worker が止められる等）への保険
     setTimeout(() => {
       if (!hintBusy || solveId !== id) return;
@@ -1250,6 +1268,7 @@ function newPuzzle(useSeed) {
   moves = 0;
   run = { i: -1, d: 0, order: 1 };
   hintPlan = null;
+  longSolveTried = false;
   locked = false;
 
   // 解法の準備。計算中の Worker は捨てて作り直す（古い盤面の計算を待たないため）
