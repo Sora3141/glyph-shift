@@ -1,0 +1,14 @@
+let fail = 0;
+const ok = (c, m) => { if (!c) { console.log('  FAIL:', m); fail++; } };
+W = H = 4; SIZE = 16; buildDom(); newPuzzle(1);
+const body = document.body;
+ok(!body._cls.has('no-scroll'), '初期状態でスクロールが止まっている');
+document.getElementById('setupBtn').fire('click', {});
+ok(body._cls.has('no-scroll'), '設定パネルを開いても背景が固定されない');
+document.getElementById('setupClose').fire('click', {});
+ok(!body._cls.has('no-scroll'), '設定パネルを閉じても背景が固定されたまま');
+document.getElementById('menuBtn').fire('click', {});
+ok(body._cls.has('no-scroll'), '説明パネルを開いても背景が固定されない');
+document.getElementById('panelBackdrop').fire('click', {});
+ok(!body._cls.has('no-scroll'), '背景タップで閉じても固定が残る');
+console.log(fail === 0 ? '背景スクロール固定: OK' : `失敗 ${fail} 件`);
