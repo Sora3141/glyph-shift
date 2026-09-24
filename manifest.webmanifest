@@ -1,6 +1,6 @@
 {
-  "name": "Glyph Shift",
-  "short_name": "Glyph Shift",
+  "name": "ABILITILE",
+  "short_name": "ABILITILE",
   "description": "絵柄が能力を表すパズル。押すとその絵柄の効果が発動し、能力はブロックに付いて一緒に動く。盤面を目標の柄に揃えるとクリア。",
   "lang": "ja",
   "dir": "ltr",

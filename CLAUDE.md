@@ -1,4 +1,4 @@
-# Glyph Shift
+# ABILITILE（旧名 Glyph Shift。リポジトリ名・URL・保存キーは glyph-shift のまま）
 
 T.OF... のアプリ。https://t-of.github.io/glyph-shift/
 
