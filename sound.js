@@ -17,8 +17,20 @@ const Sfx = (() => {
     : typeof webkitAudioContext !== 'undefined' ? webkitAudioContext
     : null;
 
+  // iPhone のマナーモードでも鳴らす（Safari 16.4 以降）。
+  // 'playback' にすると音楽アプリの曲が止まるので、音がオンのときだけにする。
+  function setAudioSession(soundOn) {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.audioSession) {
+        navigator.audioSession.type = soundOn ? 'playback' : 'auto';
+      }
+    } catch (e) { /* 対応していない */ }
+  }
+  setAudioSession(on);
+
   function ready() {
     if (!on || !Ctor) return null;
+    setAudioSession(true);
     if (!ctx) ctx = new Ctor();
     if (ctx.state === 'suspended') ctx.resume();
     return ctx;
@@ -52,6 +64,7 @@ const Sfx = (() => {
       on = !!v;
       try { if (typeof localStorage !== 'undefined') localStorage.setItem(KEY, on ? 'on' : 'off'); }
       catch (e) { /* 保存できなくても動作は変えない */ }
+      setAudioSession(on);
       if (on) blip(NOTES[3], { dur: 0.08, gain: 0.08 });
     },
 
