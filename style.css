@@ -28,6 +28,9 @@
 
 * { box-sizing: border-box; }
 
+/* Safari 26 は上下のバーの色を html から取るので、body と同じ地を塗っておく */
+html { background: var(--ground); }
+
 body {
   margin: 0;
   padding: calc(var(--rail-h) + 40px) 24px 72px;
@@ -272,6 +275,12 @@ body {
 
 .seed { margin: 0; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--dim); text-transform: uppercase; }
 .seed code { font-family: inherit; color: var(--accent); }
+
+/* 制作元（ポータル）へのリンク。盤から離れた欄の末尾に小さく置く */
+.credit { margin: -14px 0 0; font-size: 10.5px; color: var(--dim); letter-spacing: .04em; }
+.credit a { color: var(--dim); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line); }
+.credit a:hover { color: var(--text); text-decoration-color: var(--dim); }
+.credit a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
 /* ---- 引き出し ---- */
 .panel-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(10, 9, 13, .6); }

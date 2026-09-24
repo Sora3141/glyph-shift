@@ -10,8 +10,11 @@
 // 更新の合図を人の手に委ねない形にしてある。VERSION は箱の名前を変えて
 // 作り直すためだけのもので、上げ忘れても新しい中身は届く。
 const VERSION = 'v2';
-const SHELL = `glyph-shift-shell-${VERSION}`;
-const FONTS = 'glyph-shift-fonts';
+// 箱の名前は必ずこの接頭辞で始める。sora3141.github.io の他のアプリと同じ生地（オリジン）で
+// CacheStorage を分け合っているので、片付けるときは自分の接頭辞のものにしか手を出さない。
+const PREFIX = 'glyph-shift-';
+const SHELL = `${PREFIX}shell-${VERSION}`;
+const FONTS = `${PREFIX}fonts`;
 
 // 画面を出すのに要るもの。すべて同じ生地（同一オリジン）。
 const FILES = [
@@ -40,7 +43,10 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.map((k) => (k === SHELL || k === FONTS ? null : caches.delete(k)))))
+      // 消すのは自分の古い箱だけ。他のアプリの箱は同じ生地にあっても残す
+      .then((keys) => Promise.all(keys
+        .filter((k) => k.startsWith(PREFIX) && k !== SHELL && k !== FONTS)
+        .map((k) => caches.delete(k))))
       .then(() => self.clients.claim())   // 初回、今開いている画面もすぐ受け持つ
   );
 });

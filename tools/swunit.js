@@ -85,6 +85,8 @@ const fire = async (type, extra = {}) => {
   console.log('入れるとき（install）');
   // 古い版の箱があるところから始める
   (await caches.open('glyph-shift-shell-v0')).put(new Req('index.html'), new Res('ふるい'));
+  // 同じ生地（sora3141.github.io）にいる他のアプリの箱
+  (await caches.open('gear-align-v1')).put(new Req('index.html'), new Res('よそ'));
   await fire('install');
   const shells = (await caches.keys()).filter((k) => k.startsWith('glyph-shift-shell'));
   ok(shells.length === 2, `入れた直後の箱: ${shells.join(', ')}`);
@@ -99,7 +101,7 @@ const fire = async (type, extra = {}) => {
   // index.html が指すファイルが、ひとつ残らず一式に入っているか
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const refs = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((m) => m[1])
-    .filter((u) => !/^https?:/.test(u) && u !== 'sw.js');
+    .filter((u) => !/^https?:/.test(u) && u !== 'sw.js' && u !== '/'); // '/' はポータルへのリンク（このアプリの外）
   for (const r of refs) ok(files.includes(r), `index.html が指す ${r} が一式に入っていない`);
   console.log(`  index.html が指す ${refs.length} 件はすべて一式にある`);
 
@@ -108,6 +110,7 @@ const fire = async (type, extra = {}) => {
   const left = await caches.keys();
   ok(!left.includes('glyph-shift-shell-v0'), `古い箱が残っている: ${left.join(', ')}`);
   ok(left.includes(now), '今の箱まで捨てている');
+  ok(left.includes('gear-align-v1'), `他のアプリの箱まで捨てている: ${left.join(', ')}`);
   ok(claimed, '今開いている画面を受け持っていない');
 
   console.log('\n通信が無いとき');
