@@ -10,7 +10,7 @@
 // 更新の合図を人の手に委ねない形にしてある。VERSION は箱の名前を変えて
 // 作り直すためだけのもので、上げ忘れても新しい中身は届く。
 const VERSION = 'v3';
-// 箱の名前は必ずこの接頭辞で始める。sora3141.github.io の他のアプリと同じ生地（オリジン）で
+// 箱の名前は必ずこの接頭辞で始める。t-of.github.io の他のアプリと同じ生地（オリジン）で
 // CacheStorage を分け合っているので、片付けるときは自分の接頭辞のものにしか手を出さない。
 const PREFIX = 'glyph-shift-';
 const SHELL = `${PREFIX}shell-${VERSION}`;

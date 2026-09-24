@@ -1,6 +1,6 @@
 # Glyph Shift ソルバー 引き継ぎメモ（2026-09-23）
 
-新しいチャットで開発を続けるための要約。リポジトリは `/Users/kases/dev/square-game`（GitHub: Sora3141/glyph-shift）。
+新しいチャットで開発を続けるための要約。リポジトリは `/Users/kases/dev/square-game`（GitHub: t-of/glyph-shift）。
 遊び方と画面の説明は `README.md` にある。ここではソルバー（`solver.js`）の状態だけを書く。
 背景の詳しい経緯は `~/.claude/projects/-Users-kases-dev/memory/square-game-solver.md` にもある。
 

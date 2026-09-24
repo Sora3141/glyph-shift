@@ -5,10 +5,10 @@
 
 ## 🔗 リンク
 
-**▶ [ブラウザで遊ぶ](https://sora3141.github.io/glyph-shift/)**
-（リポジトリ: https://github.com/Sora3141/glyph-shift ）
+**▶ [ブラウザで遊ぶ](https://t-of.github.io/glyph-shift/)**
+（リポジトリ: https://github.com/t-of/glyph-shift ）
 
-制作: [T.OF...](https://sora3141.github.io/)
+制作: [T.OF...](https://t-of.github.io/)
 
 ## 遊び方
 

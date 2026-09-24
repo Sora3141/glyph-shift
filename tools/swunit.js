@@ -85,7 +85,7 @@ const fire = async (type, extra = {}) => {
   console.log('入れるとき（install）');
   // 古い版の箱があるところから始める
   (await caches.open('glyph-shift-shell-v0')).put(new Req('index.html'), new Res('ふるい'));
-  // 同じ生地（sora3141.github.io）にいる他のアプリの箱
+  // 同じ生地（t-of.github.io）にいる他のアプリの箱
   (await caches.open('gear-align-v1')).put(new Req('index.html'), new Res('よそ'));
   await fire('install');
   const shells = (await caches.keys()).filter((k) => k.startsWith('glyph-shift-shell'));
