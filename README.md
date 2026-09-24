@@ -6,7 +6,7 @@
 **▶ [ブラウザで遊ぶ](https://sora3141.github.io/glyph-shift/)**
 （リポジトリ: https://github.com/Sora3141/glyph-shift ）
 
-制作: [T.OFO](https://sora3141.github.io/)
+制作: [T.OF...](https://sora3141.github.io/)
 
 手元で動かす場合も `index.html` をブラウザで開くだけ。ビルドも依存もない。
 
