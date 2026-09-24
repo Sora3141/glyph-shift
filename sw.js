@@ -9,7 +9,7 @@
 // 上げ忘れると古い一式が配られ続けた（実際に 3 回続けて上げ忘れた）。
 // 更新の合図を人の手に委ねない形にしてある。VERSION は箱の名前を変えて
 // 作り直すためだけのもので、上げ忘れても新しい中身は届く。
-const VERSION = 'v2';
+const VERSION = 'v3';
 // 箱の名前は必ずこの接頭辞で始める。sora3141.github.io の他のアプリと同じ生地（オリジン）で
 // CacheStorage を分け合っているので、片付けるときは自分の接頭辞のものにしか手を出さない。
 const PREFIX = 'glyph-shift-';
@@ -19,18 +19,22 @@ const FONTS = `${PREFIX}fonts`;
 // 画面を出すのに要るもの。すべて同じ生地（同一オリジン）。
 const FILES = [
   './',
-  'index.html',
-  'style.css',
-  'sound.js',
-  'patterns.js',
-  'glyphs.js',
-  'solver.js',
-  'script.js',
-  'manifest.webmanifest',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/maskable-512.png',
-  'icons/apple-touch-icon.png',
+  './index.html',
+  './style.css',
+  './sound.js',
+  './patterns.js',
+  './glyphs.js',
+  './solver.js',
+  './script.js',
+  './webapp-kit/webapp-kit.css',
+  './webapp-kit/webapp-kit.js',
+  './manifest.webmanifest',
+  './icons/icon.svg',
+  './icons/favicon-32.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/maskable-512.png',
+  './icons/apple-touch-icon.png',
 ];
 
 self.addEventListener('install', (e) => {
@@ -73,7 +77,7 @@ self.addEventListener('fetch', (e) => {
       fetchAndKeep(SHELL, req).catch(() => caches.match(req, { ignoreSearch: true })
         // 箱にも無いとき、画面への求めには置いてある画面を返す
         .then((hit) => hit
-          || (req.mode === 'navigate' ? caches.match('index.html') : Promise.reject(new Error('offline')))))
+          || (req.mode === 'navigate' ? caches.match('./index.html') : Promise.reject(new Error('offline')))))
     );
     return;
   }

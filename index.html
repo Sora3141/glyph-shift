@@ -3,21 +3,37 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Glyph Shift</title>
+<meta name="theme-color" content="#131217">
+<meta name="description" content="絵柄が能力を表すパズル。押すとその絵柄の効果が発動し、能力はブロックに付いて一緒に動く。">
+<title>Glyph Shift — 絵柄が能力になるパズル</title>
+
+<!-- アプリとしてインストールできるようにする（Chrome の「アプリをインストール」、iPhone の「ホーム画面に追加」） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Glyph Shift">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+
+<!-- 共有したときのカード -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Glyph Shift">
+<meta property="og:title" content="Glyph Shift — 絵柄が能力になるパズル">
+<meta property="og:description" content="絵柄が能力を表すパズル。押すとその絵柄の効果が発動し、能力はブロックに付いて一緒に動く。">
+<meta property="og:url" content="https://sora3141.github.io/glyph-shift/">
+<meta property="og:image" content="https://sora3141.github.io/glyph-shift/icons/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Martian+Mono:wght@400;600&display=swap">
-<link rel="stylesheet" href="style.css">
-
-<!-- アプリとしてインストールできるようにする（Chrome の「アプリをインストール」） -->
-<meta name="description" content="絵柄が能力を表すパズル。押すとその絵柄の効果が発動し、能力はブロックに付いて一緒に動く。">
-<meta name="theme-color" content="#131217">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Glyph Shift">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!-- webapp-kit を先に読み、色（--wak-*）は style.css で上書きする -->
+<link rel="stylesheet" href="./webapp-kit/webapp-kit.css">
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="rail">
@@ -188,6 +204,20 @@
       </section>
       <p class="seed">SEED <code id="seedOut">-</code></p>
       <p class="credit"><a href="/">T.OF...</a> のアプリ</p>
+      <div class="kit">
+        <button class="kit-btn" type="button" data-wak="install" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>
+          </svg>
+          アプリにする
+        </button>
+        <button class="kit-btn" type="button" data-wak="share">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3.5v11M8 7.5l4-4 4 4M7 11H5.5v9.5h13V11H17"/>
+          </svg>
+          共有
+        </button>
+      </div>
     </aside>
   </main>
 
@@ -230,17 +260,18 @@
     <button id="autoStop" class="auto-quit" type="button">やめる</button>
   </div>
 
-  <script src="sound.js"></script>
-  <script src="patterns.js"></script>
-  <script src="glyphs.js"></script>
-  <script src="solver.js"></script>
-  <script src="script.js"></script>
+  <script src="./sound.js"></script>
+  <script src="./patterns.js"></script>
+  <script src="./glyphs.js"></script>
+  <script src="./solver.js"></script>
+  <script src="./script.js"></script>
+  <script src="./webapp-kit/webapp-kit.js"></script>
   <script>
     // Service Worker はインストールの条件であり、通信が無くても遊べるようにするもの。
     // file:// で開いたときは登録できないので、その場合は黙って見送る。
     if ('serviceWorker' in navigator
         && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+      addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
     }
   </script>
 </body>
