@@ -179,6 +179,7 @@ body {
 
 .slot { position: relative; border-radius: 11px; background: #17151d; }
 
+/* 立体のタイル。厚み（下側の濃い縁）＋上端のハイライト＋台からの浮き。絵柄はそのまま見せる。 */
 .tile {
   position: absolute;
   inset: 0;
@@ -189,13 +190,44 @@ body {
   user-select: none;
   -webkit-touch-callout: none;
   touch-action: manipulation;
+  box-shadow:
+    inset 0 -7px 0 rgba(0, 0, 0, .38),
+    inset 0 2px 0 rgba(255, 255, 255, .4),
+    inset 0 0 0 1px rgba(0, 0, 0, .18),
+    0 3px 0 rgba(0, 0, 0, .5),
+    0 5px 8px rgba(0, 0, 0, .35);
   transition: box-shadow .15s ease, filter .12s ease;
 }
-.tile svg { width: 74%; height: 74%; display: block; }
-@media (hover: hover) {
-  .tile:hover { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .72); }
+/* 上からの柔らかい光。絵柄を隠さないよう控えめに、押せない */
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .32) 0%, rgba(255, 255, 255, .08) 32%, rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, .16) 100%);
+  pointer-events: none;
 }
-.tile:active { filter: brightness(1.2); }
+.tile svg { width: 74%; height: 74%; display: block; position: relative; }
+@media (hover: hover) {
+  .tile:hover {
+    box-shadow:
+      inset 0 -7px 0 rgba(0, 0, 0, .38),
+      inset 0 2px 0 rgba(255, 255, 255, .4),
+      inset 0 0 0 2px rgba(255, 255, 255, .72),
+      0 3px 0 rgba(0, 0, 0, .5),
+      0 6px 10px rgba(0, 0, 0, .4);
+  }
+}
+/* 押すと沈む見た目。タイルは WAAPI で transform を動かすことがあるので、
+   沈みは box-shadow と明るさだけで表す（translateY は使わない）。 */
+.tile:active:not(.off):not(.blank) {
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, .3),
+    inset 0 2px 4px rgba(0, 0, 0, .35),
+    inset 0 0 0 1px rgba(0, 0, 0, .18);
+  filter: brightness(.92);
+}
+.tile:active:not(.off):not(.blank)::before { opacity: .5; }
 .tile.off { cursor: not-allowed; }
 .tile.off:active { filter: none; }
 /* 能力を持たないマス。位置のせいではないので暗くはしない（地の色がもう暗い） */
@@ -276,13 +308,42 @@ body {
 
 .mini { --cell: var(--mini-cell, 30px); --gap: 4px; }
 .mini .slot { border-radius: 6px; background: none; }
-.mini .tile { border-radius: 6px; cursor: default; }
-.mini .tile:hover { box-shadow: none; }
+/* 小さいタイルなので、厚みと影は本盤より弱める（潰れて見えないように） */
+.mini .tile {
+  border-radius: 6px;
+  cursor: default;
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, .35),
+    inset 0 1px 0 rgba(255, 255, 255, .35),
+    inset 0 0 0 1px rgba(0, 0, 0, .18),
+    0 2px 0 rgba(0, 0, 0, .45),
+    0 2px 4px rgba(0, 0, 0, .3);
+}
+.mini .tile::before { background: linear-gradient(180deg, rgba(255, 255, 255, .28) 0%, rgba(255, 255, 255, .06) 32%, rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, .14) 100%); }
+.mini .tile:hover { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .35), inset 0 0 0 1px rgba(0, 0, 0, .18), 0 2px 0 rgba(0, 0, 0, .45), 0 2px 4px rgba(0, 0, 0, .3); }
 
 .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
 .legend li { display: flex; align-items: center; gap: 10px; font-size: 11.5px; line-height: 1.45; color: var(--dim); }
-.legend .chip { width: 28px; height: 28px; flex: none; border-radius: 7px; display: grid; place-items: center; }
-.legend .chip svg { width: 74%; height: 74%; display: block; }
+.legend .chip { width: 28px; height: 28px; flex: none; border-radius: 7px; display: grid; place-items: center; position: relative; }
+.legend .chip svg { width: 74%; height: 74%; display: block; position: relative; }
+
+/* 使うブロックの一覧・目標の柄・凡例のミニタイルにも同じ立体感を、小さいぶん弱めて付ける */
+.legend .chip, .blk .chip {
+  box-shadow:
+    inset 0 -3px 0 rgba(0, 0, 0, .35),
+    inset 0 1px 0 rgba(255, 255, 255, .35),
+    inset 0 0 0 1px rgba(0, 0, 0, .18),
+    0 2px 0 rgba(0, 0, 0, .45),
+    0 2px 4px rgba(0, 0, 0, .3);
+}
+.legend .chip::before, .blk .chip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .28) 0%, rgba(255, 255, 255, .06) 32%, rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, .14) 100%);
+  pointer-events: none;
+}
 
 .seed { margin: 0; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; color: var(--dim); text-transform: uppercase; }
 .seed code { font-family: inherit; color: var(--accent); }
@@ -398,8 +459,8 @@ body {
 }
 .fam-list { display: flex; flex-direction: column; gap: 16px; }
 .blk { display: grid; grid-template-columns: 42px 1fr; gap: 12px; }
-.blk .chip { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; }
-.blk .chip svg { width: 74%; height: 74%; display: block; }
+.blk .chip { width: 42px; height: 42px; border-radius: 10px; display: grid; place-items: center; position: relative; }
+.blk .chip svg { width: 74%; height: 74%; display: block; position: relative; }
 .blk-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .blk-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; font-weight: 600; }
 .blk-name .used {
